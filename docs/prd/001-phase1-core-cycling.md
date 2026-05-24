@@ -1,5 +1,3 @@
-# Phase 1 PRD: 核心骑行 — WindChaser
-
 ## Problem Statement
 
 骑行爱好者需要一个 iPhone 原生码表 App。用户打开手机就能记录骑行，看到实时速度、距离、轨迹和海拔坡度，骑完后能查看历史记录并导出数据。现有方案（Strava、行者）要么收费、要么广告多、要么数据归属受限。
@@ -30,49 +28,64 @@
 ### 架构
 
 - **MVVM + Actor 分离**。传感器采集（SensorEngine actor）、状态机与存储（RideStore actor）、WCS 通信（WCSManager actor）各自封装为独立 Swift actor。ViewModel（@MainActor）从 actor 订阅数据并桥接到 @Published。
+- **WCSManager（Phase 1）**：Phase 1 **建立空壳**（actor + 接口/占位，不接真实 WatchConnectivity）；Phase 2 在同一模块内接入 WCS。
 - **统一采样循环**。SensorEngine 以固定 1Hz 频率从各路传感器读最新值，打包为 BikeDataSnapshot struct，广播给 UI、存储和后续的 ActivityKit。
 - **RideState 枚举**：`.idle → .riding → .paused → .ended`，pause 最长 1 小时后自动 end。状态机在 RideStore actor 内集中管理。
 
 ### 存储
 
 - **SQLite 文件存储**。每次骑行一个 `.ridesqlite` 文件，包含 `samples` 表（timestamp, lat, lon, altitude, speed, hr, cadence, power, ...）。WAL 模式，每秒 INSERT + COMMIT，事务保护防数据损坏。
+- **暂停期间（`.paused`）**：不 INSERT 采样点（方案 A）；不计入距离与均速统计。
 - **HealthKit 写入**。骑行结束时写入 HKWorkout（距离、时长、卡路里），关联心率样本（HKQuantitySample）和 GPS 路线（HKWorkoutRoute）。
 - **GPX/CSV 导出**。导出本质是 `SELECT * FROM samples ORDER BY timestamp` 然后格式转换，零数据迁移成本。
 - **异常退出处理**。检测到上次骑行状态为 `.riding` 或 `.paused` 时，标记该骑行为"异常结束"，采样数据截止到最后一条 SQLite 记录。
+
+### 当前速度（Current Speed）
+
+- **数据源（Phase 1）**：仅 iPhone GPS（`CLLocation.speed` 或等效原始值）；无外设时心率/踏频/功率显示 `--`。
+- **刷新与实时性**：1Hz 更新；UI 显示 **瞬时速度**，**不做滑动平均/平滑窗口**（避免延迟）。
+- **存库**：`samples.speed` 写入 **原始 speed**（与 UI 显示规则无关，便于 GPX/CSV 分析）。
+- **UI 显示规则**：
+  - 瞬时速度 **≥ 1.5 km/h**：显示数值（如 `24.3 km/h`）
+  - 瞬时速度 **< 1.5 km/h**：显示 **`<1.5km/h`**
+  - GPS 无效或精度过差：显示 **`--`**
+- **1.5 km/h 阈值说明**：非 GPS 硬件/API 固定常量；为工程约定（低速 GPS 噪声、与 Phase 3 自动暂停检测阈值对齐）。Phase 1 仅用于 UI 表达；统计均速仍用「总距离 ÷ 运动时间（不含暂停）」。
 
 ### UI 交互
 
 - **全屏地图 + 底部数据浮层**。MKMapView（车头向上跟随模式），浮层显示 4 个核心数据（时长/心率/距离/速度）。上滑展开为 8 宫格仪表盘（可自定义字段和顺序）。
 - **地图离线**。使用系统 MKMapView 底图，App 内提示用户在 iOS 设置中提前下载离线地图区域。
-- **预检面板**。开始前展示 GPS 🟢 + 各传感器状态指示灯，用户可以跳过等待直接开始。
+- **预检面板**。开始前展示 GPS + 各传感器状态指示灯，用户可以跳过等待直接开始。
+- **地图**：只绘制已骑行轨迹。不导入路书，不支持偏航提醒。轨迹绘制依赖网络加载底图瓦片，GPS 不依赖网络。
 
-### 电池
+## Agreed Decisions (Discussion Log)
 
-- **Phase 1 不做电池智能降频**。全程使用 BestForNavigation 精度。降频策略在 Phase 3 实现。
+> 以下为 Phase 1 讨论定稿，与上文 Implementation Decisions 一致，便于实现对照。
 
-### 地图
-
-- **只绘制已骑行轨迹**。不导入路书，不支持偏航提醒。路书功能在 Phase 3。
-- **轨迹绘制依赖网络**。需要网络加载地图瓦片。无网络时轨迹数据正常记录但不显示底图（GPS 不依赖网络）。
+| 议题 | 决定 |
+|------|------|
+| WCSManager | Phase 1 建空壳，Phase 2 接入 |
+| SQLite | 1Hz INSERT + 每秒 COMMIT；可接受 |
+| 暂停记点 | 方案 A：暂停不写点、不计距/均速 |
+| 当前速度 UI | 1Hz 瞬时速度，无平滑 |
+| 当前速度存库 | 原始 speed |
+| 低速 UI | < 1.5 km/h 显示 `<1.5km/h` |
+| 无效 GPS | 显示 `--` |
+| 1.5 阈值 | 工程约定，非 GPS 固定值；与 Phase 3 自动暂停对齐 |
 
 ## Testing Decisions
 
-- **只测纯逻辑**：RideState 状态机转换正确性、BikeDataSnapshot 计算属性、SQLite CRUD（用临时文件）、GPX/CSV 导出格式正确性
+- **只测纯逻辑**：RideState 状态机转换正确性、BikeDataSnapshot 计算属性、SQLite CRUD（用临时文件）、GPX/CSV 导出格式正确性、当前速度 UI 分支（≥1.5 / <1.5 / 无效）
 - **不 mock 系统框架**：CoreLocation, CoreMotion, HealthKit 行为不做 mock 测试
-- 测试文件放在 `WindChaserTests/` 目录
 
 ## Out of Scope
 
-- Watch 任何功能（中继 + 独立码表，Phase 2 & 4）
+- Watch 任何功能（Phase 2 & 4）
 - ActivityKit 锁屏实时活动（Phase 2）
-- 外接蓝牙传感器（心率带、踏频器、功率计，Phase 2）
-- 自动暂停（Phase 3）
-- 电池智能降频（Phase 3）
-- 日历热力图（Phase 3）
-- 路书导入 + 偏航提醒（Phase 3）
+- 外接蓝牙传感器（Phase 2）
+- 自动暂停、电池智能降频、日历热力图、路书导入 + 偏航提醒（Phase 3）
 
 ## Further Notes
 
-- iOS 16.1 为最低版本。使用 `@available(iOS 17, *)` 做渐进增强（如 `@Observable` 替代 `@ObservableObject`）
-- 导航手势：仪表页 ↔ 全屏地图页，左右横扫切换
-- 历史记录和设置的入口在仪表页角落，右键设置齿轮
+- iOS 16.1 为最低版本。使用 `@available(iOS 17, *)` 做渐进增强
+- 预估周期：6-8 周
