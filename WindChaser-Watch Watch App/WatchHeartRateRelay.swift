@@ -46,19 +46,21 @@ final class WatchHeartRateRelay: NSObject {
         }
     }
 
-    /// 请求心率读取权限。
+    /// 请求心率读取权限与 workout 写入权限。
     ///
     /// 注意：`HKHealthStore.authorizationStatus(for:)` 只可靠表达写入/共享权限，
-    /// 不适合用来判断 read-only 的心率读取权限。用户在系统弹窗中授权读取后，
-    /// requestAuthorization 会正常返回；因此这里以「请求无异常返回」作为可继续启动
-    /// workout 的信号，避免把 read-only 权限误判成 `.sharingDenied`。
+    /// 不适合用来判断 read-only 的心率读取权限。`HKWorkoutSession` 需要 workout
+    /// 写权限才能启动；S8 会补完整 HKWorkout 写入，本阶段只用它驱动实时心率采集。
     func requestAuthorization() async {
         guard HKHealthStore.isHealthDataAvailable() else {
             authorizationStatus = .denied
             return
         }
         do {
-            try await healthStore.requestAuthorization(toShare: [], read: [heartRateType])
+            try await healthStore.requestAuthorization(
+                toShare: [HKObjectType.workoutType()],
+                read: [heartRateType]
+            )
             authorizationStatus = .authorized
         } catch {
             print("HealthKit authorization request failed: \(error)")
@@ -101,6 +103,7 @@ final class WatchHeartRateRelay: NSObject {
             isWorkoutActive = true
         } catch {
             print("Failed to start workout session: \(error)")
+            authorizationStatus = .denied
             cleanupWorkoutState()
         }
     }

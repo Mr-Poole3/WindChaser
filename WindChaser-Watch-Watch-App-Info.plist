@@ -4,6 +4,8 @@
 <dict>
 	<key>NSHealthShareUsageDescription</key>
 	<string>WindChaser 需要读取你的心率数据用于骑行记录。</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>WindChaser 需要启动骑行体能训练以读取 Apple Watch 心率。</string>
 	<key>UIBackgroundModes</key>
 	<array/>
 	<key>WKBackgroundModes</key>
