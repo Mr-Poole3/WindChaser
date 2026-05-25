@@ -34,6 +34,12 @@ struct ContentView: View {
                 connectivity.sendRelayState(relayState)
             }
         }
+        .onChange(of: connectivity.controlCommandSequence) {
+            guard let command = connectivity.latestControlCommand else { return }
+            Task {
+                await handleControlCommand(command)
+            }
+        }
     }
 
     // MARK: - Sections
@@ -139,6 +145,20 @@ struct ContentView: View {
         case .relaying:
             .green
         }
+    }
+
+    private func handleControlCommand(_ command: RideControlCommand) async {
+        switch command {
+        case .start:
+            await heartRate.startWorkoutIfNeeded()
+        case .pause:
+            heartRate.pauseWorkout()
+        case .resume:
+            heartRate.resumeWorkout()
+        case .end:
+            await heartRate.stopWorkout()
+        }
+        connectivity.sendRelayState(relayState)
     }
 }
 

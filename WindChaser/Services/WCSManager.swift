@@ -66,6 +66,10 @@ final class WCSManager: NSObject {
         sendSessionContext(sessionID)
     }
 
+    func sendControlCommand(_ command: RideControlCommand) {
+        send(.control(command), debugLabel: "Watch control command")
+    }
+
     func heartRateStream() -> AsyncStream<HeartRateRelayMessage> {
         AsyncStream { continuation in
             let id = UUID()
@@ -108,21 +112,25 @@ final class WCSManager: NSObject {
     }
 
     private func sendSessionContext(_ sessionID: UUID?) {
+        send(
+            .sessionContext(WatchSessionContextMessage(sessionID: sessionID)),
+            debugLabel: "Watch session context"
+        )
+    }
+
+    private func send(_ message: WatchMessage, debugLabel: String) {
         guard let session, session.activationState == .activated, session.isReachable else { return }
 
-        let message = WatchMessage.sessionContext(
-            WatchSessionContextMessage(sessionID: sessionID)
-        )
         do {
             session.sendMessage(
                 try message.dictionaryPayload(),
                 replyHandler: nil,
                 errorHandler: { error in
-                    print("Failed to send Watch session context: \(error)")
+                    print("Failed to send \(debugLabel): \(error)")
                 }
             )
         } catch {
-            print("Failed to encode Watch session context: \(error)")
+            print("Failed to encode \(debugLabel): \(error)")
         }
     }
 

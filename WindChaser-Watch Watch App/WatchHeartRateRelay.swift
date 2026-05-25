@@ -19,6 +19,7 @@ final class WatchHeartRateRelay: NSObject {
 
     private(set) var authorizationStatus: AuthorizationStatus = .notDetermined
     private(set) var isWorkoutActive: Bool = false
+    private(set) var isWorkoutPaused: Bool = false
     private(set) var currentHeartRate: Int?
     private(set) var lastHeartRateAt: Date?
     private(set) var sampleSequence: Int = 0
@@ -37,13 +38,10 @@ final class WatchHeartRateRelay: NSObject {
     /// 步骤：
     /// 1. 自愈上次崩溃留下的活动 workout（如果有）
     /// 2. 请求 HealthKit 心率读取权限
-    /// 3. 已授权则立即启动 workout，让 UI 能演示真实心率
+    /// 3. 等待 iPhone 通过 WCS 下发 start 命令后再启动 workout
     func bootstrap() async {
         await recoverHangingWorkout()
         await requestAuthorization()
-        if authorizationStatus == .authorized {
-            await startWorkoutIfNeeded()
-        }
     }
 
     /// 请求心率读取权限与 workout 写入权限。
@@ -101,11 +99,24 @@ final class WatchHeartRateRelay: NSObject {
             workoutSession = session
             workoutBuilder = builder
             isWorkoutActive = true
+            isWorkoutPaused = false
         } catch {
             print("Failed to start workout session: \(error)")
             authorizationStatus = .denied
             cleanupWorkoutState()
         }
+    }
+
+    func pauseWorkout() {
+        guard let workoutSession, isWorkoutActive, !isWorkoutPaused else { return }
+        workoutSession.pause()
+        isWorkoutPaused = true
+    }
+
+    func resumeWorkout() {
+        guard let workoutSession, isWorkoutPaused else { return }
+        workoutSession.resume()
+        isWorkoutPaused = false
     }
 
     /// 结束当前 workout（如果有），并清空缓存。
@@ -145,6 +156,7 @@ final class WatchHeartRateRelay: NSObject {
         workoutSession = nil
         workoutBuilder = nil
         isWorkoutActive = false
+        isWorkoutPaused = false
         currentHeartRate = nil
         lastHeartRateAt = nil
         sampleSequence = 0
@@ -160,8 +172,13 @@ final class WatchHeartRateRelay: NSObject {
         switch state {
         case .running:
             isWorkoutActive = true
+            isWorkoutPaused = false
+        case .paused:
+            isWorkoutActive = true
+            isWorkoutPaused = true
         case .ended, .stopped:
             isWorkoutActive = false
+            isWorkoutPaused = false
             currentHeartRate = nil
             lastHeartRateAt = nil
         default:

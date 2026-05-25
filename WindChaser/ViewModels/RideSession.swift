@@ -53,8 +53,9 @@ public final class RideSession {
             let id = try await RideStore.shared.startRide()
             rideID = id
             WCSManager.shared.setActiveRideSession(id)
-            listenToWatchHeartRate(sessionID: id)
             startedAt = Date()
+            WCSManager.shared.sendControlCommand(.start(sessionID: id, startedAt: startedAt))
+            listenToWatchHeartRate(sessionID: id)
             pausedAccumulated = 0
             metrics.elapsed = 0
             metrics.distanceMeters = 0
@@ -202,6 +203,9 @@ public final class RideSession {
         state = .paused
         pauseBeganAt = Date()
         elapsedTimer?.cancel()
+        if let rideID {
+            WCSManager.shared.sendControlCommand(.pause(sessionID: rideID))
+        }
 
         Task {
             try? await RideStore.shared.pauseRide()
@@ -216,6 +220,9 @@ public final class RideSession {
         self.pauseBeganAt = nil
         state = .riding
         startElapsedTimer()
+        if let rideID {
+            WCSManager.shared.sendControlCommand(.resume(sessionID: rideID))
+        }
 
         Task {
             try? await RideStore.shared.resumeRide()
@@ -229,6 +236,9 @@ public final class RideSession {
         subscriptionTask = nil
         heartRateRelayTask?.cancel()
         heartRateRelayTask = nil
+        if let rideID {
+            WCSManager.shared.sendControlCommand(.end(sessionID: rideID))
+        }
         WCSManager.shared.setActiveRideSession(nil)
 
         // 若用户从未按下"开始"直接退出，则没有可总结的记录

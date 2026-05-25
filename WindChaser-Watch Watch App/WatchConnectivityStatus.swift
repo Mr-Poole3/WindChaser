@@ -9,6 +9,8 @@ final class WatchConnectivityStatus: NSObject {
     private(set) var isReachable: Bool = false
     private(set) var isActivated: Bool = false
     private(set) var activeSessionID: UUID?
+    private(set) var latestControlCommand: RideControlCommand?
+    private(set) var controlCommandSequence: Int = 0
 
     private let session: WCSession?
 
@@ -99,8 +101,25 @@ final class WatchConnectivityStatus: NSObject {
         switch message {
         case .sessionContext(let context):
             activeSessionID = context.sessionID
-        case .control, .heartRate, .relayState:
+        case .control(let command):
+            updateActiveSession(from: command)
+            latestControlCommand = command
+            controlCommandSequence += 1
+        case .heartRate, .relayState:
             break
+        }
+    }
+
+    private func updateActiveSession(from command: RideControlCommand) {
+        switch command {
+        case .start(let sessionID, _),
+             .pause(let sessionID),
+             .resume(let sessionID):
+            activeSessionID = sessionID
+        case .end(let sessionID):
+            if activeSessionID == sessionID {
+                activeSessionID = nil
+            }
         }
     }
 }
