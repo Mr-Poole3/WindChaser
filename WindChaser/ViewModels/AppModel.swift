@@ -13,6 +13,8 @@ final class AppModel {
     var isStartingRide = false
 
     init() {
+        WCSManager.shared.startWatchSession()
+
         // 1. Core Boot Self-Healing Database Recovery Checks
         Task {
             // Scans and heals any unfinalized coordinate tables in WAL mode on Actor context

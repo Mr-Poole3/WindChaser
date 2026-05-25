@@ -19,6 +19,13 @@ struct ContentView: View {
             connectivity.start()
             await heartRate.bootstrap()
         }
+        .onChange(of: heartRate.sampleSequence) {
+            guard let bpm = heartRate.currentHeartRate,
+                  let timestamp = heartRate.lastHeartRateAt else {
+                return
+            }
+            connectivity.sendHeartRate(bpm, watchTimestamp: timestamp)
+        }
     }
 
     // MARK: - Sections

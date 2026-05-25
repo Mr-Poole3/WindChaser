@@ -8,6 +8,7 @@ enum WatchMessage: Codable, Equatable, Sendable {
     case control(RideControlCommand)
     case heartRate(HeartRateRelayMessage)
     case relayState(WatchRelayStateMessage)
+    case sessionContext(WatchSessionContextMessage)
 }
 
 enum RideControlCommand: Codable, Equatable, Sendable {
@@ -41,6 +42,16 @@ struct WatchRelayStateMessage: Codable, Equatable, Sendable {
     }
 }
 
+struct WatchSessionContextMessage: Codable, Equatable, Sendable {
+    let sessionID: UUID?
+    let generatedAt: Date
+
+    init(sessionID: UUID?, generatedAt: Date = .now) {
+        self.sessionID = sessionID
+        self.generatedAt = generatedAt
+    }
+}
+
 enum WatchRelayState: String, Codable, CaseIterable, Equatable, Sendable {
     case disconnected
     case waitingForPhone
@@ -53,5 +64,26 @@ enum SensorFreshness: String, Codable, Equatable, Sendable {
     case fresh
     case stale
     case expired
+}
+
+extension WatchMessage {
+    static let payloadKey = "payload"
+
+    func dictionaryPayload() throws -> [String: Any] {
+        [
+            Self.payloadKey: try JSONEncoder().encode(self)
+        ]
+    }
+
+    static func decode(from dictionary: [String: Any]) throws -> WatchMessage {
+        guard let data = dictionary[payloadKey] as? Data else {
+            throw WatchMessageCodingError.missingPayload
+        }
+        return try JSONDecoder().decode(WatchMessage.self, from: data)
+    }
+}
+
+enum WatchMessageCodingError: Error {
+    case missingPayload
 }
 

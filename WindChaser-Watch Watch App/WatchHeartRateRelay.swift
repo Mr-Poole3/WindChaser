@@ -21,6 +21,7 @@ final class WatchHeartRateRelay: NSObject {
     private(set) var isWorkoutActive: Bool = false
     private(set) var currentHeartRate: Int?
     private(set) var lastHeartRateAt: Date?
+    private(set) var sampleSequence: Int = 0
 
     private let healthStore = HKHealthStore()
     private let heartRateType = HKQuantityType(.heartRate)
@@ -143,11 +144,13 @@ final class WatchHeartRateRelay: NSObject {
         isWorkoutActive = false
         currentHeartRate = nil
         lastHeartRateAt = nil
+        sampleSequence = 0
     }
 
     fileprivate func ingest(heartRateSample bpm: Int) {
         currentHeartRate = bpm
         lastHeartRateAt = Date()
+        sampleSequence += 1
     }
 
     fileprivate func handleSessionStateChange(_ state: HKWorkoutSessionState) {

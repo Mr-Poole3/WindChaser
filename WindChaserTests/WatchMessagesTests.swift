@@ -1,6 +1,7 @@
 import XCTest
 @testable import WindChaser
 
+@MainActor
 final class WatchMessagesTests: XCTestCase {
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
@@ -39,6 +40,34 @@ final class WatchMessagesTests: XCTestCase {
         )
 
         let decoded = try roundTrip(message)
+
+        XCTAssertEqual(decoded, message)
+    }
+
+    func testSessionContextMessageRoundTrip() throws {
+        let message = WatchMessage.sessionContext(
+            WatchSessionContextMessage(
+                sessionID: UUID(uuidString: "33333333-3333-3333-3333-333333333333")!,
+                generatedAt: Date(timeIntervalSince1970: 1_770_000_200)
+            )
+        )
+
+        let decoded = try roundTrip(message)
+
+        XCTAssertEqual(decoded, message)
+    }
+
+    func testDictionaryPayloadRoundTrip() throws {
+        let message = WatchMessage.heartRate(
+            HeartRateRelayMessage(
+                bpm: 138,
+                watchTimestamp: Date(timeIntervalSince1970: 1_770_000_300),
+                sessionID: UUID(uuidString: "44444444-4444-4444-4444-444444444444")!
+            )
+        )
+
+        let payload = try message.dictionaryPayload()
+        let decoded = try WatchMessage.decode(from: payload)
 
         XCTAssertEqual(decoded, message)
     }

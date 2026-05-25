@@ -12,6 +12,7 @@ public final class RideSession {
     private(set) var currentCoordinate: MapCoordinate?
 
     private var subscriptionTask: Task<Void, Never>?
+    private var heartRateRelayTask: Task<Void, Never>?
     private var elapsedTimer: Task<Void, Never>?
     private var lastSampleCoordinate: MapCoordinate?
     private var lastMapCoordinateAt: Date?
@@ -51,6 +52,8 @@ public final class RideSession {
         do {
             let id = try await RideStore.shared.startRide()
             rideID = id
+            WCSManager.shared.setActiveRideSession(id)
+            listenToWatchHeartRate(sessionID: id)
             startedAt = Date()
             pausedAccumulated = 0
             metrics.elapsed = 0
@@ -107,7 +110,9 @@ public final class RideSession {
 
         metrics.speedKmh = snapshot.speed * 3.6
         metrics.speedValid = snapshot.speed >= 0
-        metrics.heartRate = snapshot.heartRate
+        if let heartRate = snapshot.heartRate {
+            metrics.heartRate = heartRate
+        }
         metrics.cadence = snapshot.cadence
         metrics.power = snapshot.power
         metrics.altitude = snapshot.altitude
@@ -151,6 +156,28 @@ public final class RideSession {
         if shouldAppendMapCoordinate(coord) {
             routeCoordinates.append(coord)
             lastMapCoordinateAt = Date()
+        }
+    }
+
+    private func listenToWatchHeartRate(sessionID: UUID) {
+        heartRateRelayTask?.cancel()
+        heartRateRelayTask = Task { [weak self] in
+            let stream = await MainActor.run {
+                WCSManager.shared.heartRateStream()
+            }
+
+            for await heartRate in stream {
+                guard !Task.isCancelled else { break }
+                await MainActor.run {
+                    guard let self,
+                          self.rideID == sessionID,
+                          heartRate.sessionID == sessionID,
+                          self.state == .riding || self.state == .paused else {
+                        return
+                    }
+                    self.metrics.heartRate = heartRate.bpm
+                }
+            }
         }
     }
 
@@ -200,6 +227,9 @@ public final class RideSession {
         elapsedTimer = nil
         subscriptionTask?.cancel()
         subscriptionTask = nil
+        heartRateRelayTask?.cancel()
+        heartRateRelayTask = nil
+        WCSManager.shared.setActiveRideSession(nil)
 
         // 若用户从未按下"开始"直接退出，则没有可总结的记录
         guard isRecording || state == .ended else {

@@ -8,6 +8,7 @@ import WatchConnectivity
 final class WatchConnectivityStatus: NSObject {
     private(set) var isReachable: Bool = false
     private(set) var isActivated: Bool = false
+    private(set) var activeSessionID: UUID?
 
     private let session: WCSession?
 
@@ -36,6 +37,44 @@ final class WatchConnectivityStatus: NSObject {
         isActivated = session.activationState == .activated
         isReachable = session.isReachable
     }
+
+    func sendHeartRate(_ bpm: Int, watchTimestamp: Date = .now) {
+        guard let activeSessionID,
+              let session,
+              session.activationState == .activated,
+              session.isReachable else {
+            return
+        }
+
+        let message = WatchMessage.heartRate(
+            HeartRateRelayMessage(
+                bpm: bpm,
+                watchTimestamp: watchTimestamp,
+                sessionID: activeSessionID
+            )
+        )
+
+        do {
+            session.sendMessage(
+                try message.dictionaryPayload(),
+                replyHandler: nil,
+                errorHandler: { error in
+                    print("Failed to send heart rate message: \(error)")
+                }
+            )
+        } catch {
+            print("Failed to encode heart rate message: \(error)")
+        }
+    }
+
+    private func receive(_ message: WatchMessage) {
+        switch message {
+        case .sessionContext(let context):
+            activeSessionID = context.sessionID
+        case .control, .heartRate, .relayState:
+            break
+        }
+    }
 }
 
 extension WatchConnectivityStatus: WCSessionDelegate {
@@ -52,6 +91,19 @@ extension WatchConnectivityStatus: WCSessionDelegate {
     nonisolated func sessionReachabilityDidChange(_: WCSession) {
         Task { @MainActor in
             refreshFromSession()
+        }
+    }
+
+    nonisolated func session(
+        _: WCSession,
+        didReceiveMessage message: [String: Any]
+    ) {
+        Task { @MainActor in
+            do {
+                receive(try WatchMessage.decode(from: message))
+            } catch {
+                print("Failed to decode iPhone message: \(error)")
+            }
         }
     }
 }
