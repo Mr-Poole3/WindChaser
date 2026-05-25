@@ -146,26 +146,34 @@ public actor SensorEngine {
     private var locationHelper: LocationManagerHelper?
     private var isSimulating = false
     private var isTracking = false
+
+    // ── 1Hz timer (shared by both GPS and simulation) ──
     private var timerTask: Task<Void, Never>?
 
-    // Mock Route simulation state
+    // ── Mock Route simulation state ──
     private var mockRoute: [MapCoordinate]
     private var currentMockIndex = 0
     private var lastAltitude: Double = 50.0
-    private var lastLocation: CLLocation?
 
     // Biometrics generation boundaries
     private var mockHeartRate = 135
     private var mockCadence = 88
     private var mockPower = 180
 
-    // Active continuations for real-time 1Hz subscription streams
-    private var continuations: [UUID: AsyncStream<BikeDataSnapshot>.Continuation] = [:]
+    // ── Real GPS: decoupled capture → 1Hz broadcast pipeline ──
+    private var latestRealLocation: CLLocation?
+    private var hasNewRealLocation = false
+    private var lastBroadcastLocation: CLLocation?
+    private var lastBroadcastTime: Date?
 
-    // Authorization / Status trackers
+    // ── GPS signal tracking ──
+    private var lastLocation: CLLocation?
     private var mockGpsStatus: GPSStatus = .ready
     private var freshLocationContinuation: CheckedContinuation<MapCoordinate?, Never>?
     private var freshLocationTimeoutTask: Task<Void, Never>?
+
+    // ── Active continuations for real-time 1Hz subscription streams ──
+    private var continuations: [UUID: AsyncStream<BikeDataSnapshot>.Continuation] = [:]
 
     private init() {
         self.mockRoute = Self.defaultMockRoute
@@ -267,10 +275,10 @@ public actor SensorEngine {
         if isSimulating {
             stopGpsTracking()
             if isTracking {
-                startSimulationTimer()
+                startTimer()
             }
         } else {
-            stopSimulationTimer()
+            stopTimer()
             if isTracking {
                 startGpsTracking()
             }
@@ -287,7 +295,7 @@ public actor SensorEngine {
         isTracking = true
 
         if isSimulating {
-            startSimulationTimer()
+            startTimer()
         } else {
             startGpsTracking()
         }
@@ -296,61 +304,138 @@ public actor SensorEngine {
     /// End sensor telemetry aggregation loops.
     public func stopEngine() {
         isTracking = false
-        stopSimulationTimer()
+        stopTimer()
         stopGpsTracking()
     }
 
-    // MARK: - Simulation Implementation
+    // MARK: - Unified 1Hz Timer
 
-    private func startSimulationTimer() {
-        stopSimulationTimer()
-        currentMockIndex = 0
-        lastAltitude = 50.0
+    /// Stable 1Hz broadcast clock. Both real GPS and simulation mode use this timer
+    /// to emit snapshots at a guaranteed cadence regardless of raw sensor frequency.
+    private func startTimer() {
+        stopTimer()
+        // Reset simulation progress when starting fresh
+        if isSimulating {
+            currentMockIndex = 0
+            lastAltitude = 50.0
+        }
+        // Reset GPS broadcast state
+        hasNewRealLocation = false
 
         timerTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 Second standard intervals
+                try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
                 guard !Task.isCancelled else { break }
-                await self?.produceSimulatedSnapshot()
+                await self?.tick()
             }
         }
     }
 
-    private func stopSimulationTimer() {
+    private func stopTimer() {
         timerTask?.cancel()
         timerTask = nil
     }
 
+    /// Fired once per second by the unified timer.
+    private func tick() {
+        if isSimulating {
+            produceSimulatedSnapshot()
+        } else {
+            broadcastFromLatestLocation()
+        }
+    }
+
+    // MARK: - Real GPS: 1Hz broadcast from latest captured location
+
+    /// Build and broadcast a snapshot from the most recently captured GPS location.
+    /// Speed is computed via position-delta when movement ≥ 3 m, falling back to
+    /// `CLLocation.speed` for low-speed / stationary readings — this gives lower
+    /// latency than relying solely on the Doppler-derived `speed` property.
+    private func broadcastFromLatestLocation() {
+        guard let location = latestRealLocation, hasNewRealLocation else { return }
+        hasNewRealLocation = false
+
+        let now = Date()
+
+        // ── Speed: position-delta primary, hardware fallback ──
+        var velocityMs = max(0, location.speed)
+        if let lastLoc = lastBroadcastLocation,
+           let lastTime = lastBroadcastTime {
+            let distance = location.distance(from: lastLoc)
+            let timeDelta = now.timeIntervalSince(lastTime)
+            if distance >= 3.0, timeDelta > 0.1 {
+                velocityMs = distance / timeDelta
+            }
+        }
+
+        // ── Grade ──
+        var calculatedGrade: Double?
+        if let lastLoc = lastBroadcastLocation {
+            let distance = location.distance(from: lastLoc)
+            if distance > 2.0 {
+                let altChange = location.altitude - lastLoc.altitude
+                calculatedGrade = (altChange / distance) * 100.0
+            }
+        }
+
+        let previousLocation = lastBroadcastLocation
+        lastBroadcastLocation = location
+        lastBroadcastTime = now
+
+        let snapshot = BikeDataSnapshot(
+            timestamp: location.timestamp,
+            receivedAt: now,
+            latitude: location.coordinate.latitude,
+            longitude: location.coordinate.longitude,
+            altitude: location.altitude,
+            speed: velocityMs,
+            heartRate: nil,
+            cadence: nil,
+            power: nil,
+            grade: calculatedGrade,
+            course: resolvedCourse(from: location, previous: previousLocation)
+        )
+
+        broadcast(snapshot)
+    }
+
+    // MARK: - Simulation Implementation
+
+    /// Produce a simulated snapshot where speed is always derived from coordinate spacing
+    /// (never random), ensuring speed and distance remain physically consistent.
     private func produceSimulatedSnapshot() {
         guard !mockRoute.isEmpty else { return }
 
-        // Compute current coordinates & step forward
         let currentCoord = mockRoute[currentMockIndex]
         let nextIndex = (currentMockIndex + 1) % mockRoute.count
         let nextCoord = mockRoute[nextIndex]
 
-        // Calculate direct great-circle spacing to compute velocity
+        // Calculate great-circle distance between consecutive route points
         let locCurrent = CLLocation(latitude: currentCoord.latitude, longitude: currentCoord.longitude)
         let locNext = CLLocation(latitude: nextCoord.latitude, longitude: nextCoord.longitude)
-        let distanceDelta = locCurrent.distance(from: locNext) // in meters
+        let distanceDelta = locCurrent.distance(from: locNext) // meters
 
-        // Simulate speed around the delta or fallback to realistic cycling pacing
-        let simulatedSpeedMs = distanceDelta > 0.1 ? distanceDelta : Double.random(in: 5.5...7.5) // ~20-27 kmh
+        // Speed = distance / 1s (tick interval); floor at 2.0 m/s (~7.2 km/h)
+        // for realistic cycling pace when route points are very close together.
+        let simulatedSpeedMs = max(2.0, distanceDelta)
 
         // Simulate grade & climbing dynamics
         let gradeDelta = Double.random(in: -2.0...5.0)
         let newAltitude = lastAltitude + (simulatedSpeedMs * (gradeDelta / 100.0))
-        lastAltitude = max(10.0, newAltitude) // Avoid going sub-sea level randomly
+        lastAltitude = max(10.0, newAltitude)
 
         currentMockIndex = nextIndex
 
-        // Fluctuating biometrics (HeartRate, Cadence, Power) inside physical capabilities
+        // Fluctuating biometrics (HeartRate, Cadence, Power)
         mockHeartRate = max(100, min(190, mockHeartRate + Int.random(in: -3...4)))
         mockCadence = max(60, min(115, mockCadence + Int.random(in: -4...5)))
         mockPower = max(80, min(450, mockPower + Int.random(in: -15...18)))
 
+        let now = Date()
+
         let snapshot = BikeDataSnapshot(
-            timestamp: Date(),
+            timestamp: now,
+            receivedAt: now,
             latitude: currentCoord.latitude,
             longitude: currentCoord.longitude,
             altitude: lastAltitude,
@@ -394,9 +479,11 @@ public actor SensorEngine {
                 helper.startUpdates()
             }
         }
+        startTimer()
     }
 
     private func stopGpsTracking() {
+        stopTimer()
         Task {
             guard let helper = locationHelper else { return }
             await MainActor.run {
@@ -405,6 +492,8 @@ public actor SensorEngine {
         }
     }
 
+    /// Capture incoming CLLocation updates. Stores the latest for 1Hz broadcast;
+    /// does NOT emit snapshots directly — decoupling raw GPS frequency from UI cadence.
     private func receiveRealLocation(_ location: CLLocation) {
         guard LocationQuality.isAcceptable(
             location,
@@ -413,48 +502,29 @@ public actor SensorEngine {
             return
         }
 
+        // Fresh location continuation for pre-ride warm-up
         if let freshLocationContinuation,
            LocationQuality.isAcceptable(location, allowRelaxedAccuracy: false) {
             finishFreshLocationRequest(with: coordinate(from: location))
         }
 
-        // Prefer monotonically improving accuracy; ignore clearly worse fixes.
+        // Accuracy degradation filter: discard a position that is ≥ 25 m worse than
+        // the previous one when within 20 m of it.  BUT with a 3-second timeout: if
+        // we haven't broadcast anything in 3 seconds, accept the degraded fix anyway
+        // to prevent the UI from freezing in urban canyons.
+        let now = Date()
         if let lastLocation,
            lastLocation.horizontalAccuracy > 0,
            location.horizontalAccuracy > lastLocation.horizontalAccuracy + 25,
            location.distance(from: lastLocation) < 20 {
-            return
-        }
-
-        // Compute speed and grade indicators on real hardware reports
-        let velocityMs = max(0, location.speed)
-
-        var calculatedGrade: Double?
-        if let lastLocation {
-            let distance = location.distance(from: lastLocation)
-            if distance > 2.0 {
-                let altChange = location.altitude - lastLocation.altitude
-                calculatedGrade = (altChange / distance) * 100.0
+            if let lastBroadcastTime, now.timeIntervalSince(lastBroadcastTime) < 3.0 {
+                return
             }
         }
 
-        let previousLocation = lastLocation
         self.lastLocation = location
-
-        let snapshot = BikeDataSnapshot(
-            timestamp: location.timestamp,
-            latitude: location.coordinate.latitude,
-            longitude: location.coordinate.longitude,
-            altitude: location.altitude,
-            speed: velocityMs,
-            heartRate: nil,
-            cadence: nil,
-            power: nil,
-            grade: calculatedGrade,
-            course: resolvedCourse(from: location, previous: previousLocation)
-        )
-
-        broadcast(snapshot)
+        self.latestRealLocation = location
+        self.hasNewRealLocation = true
     }
 
     // MARK: - Event Broadcaster
@@ -463,7 +533,9 @@ public actor SensorEngine {
         for (_, continuation) in continuations {
             let result = continuation.yield(snapshot)
             if case .dropped = result {
-                // Buffer filled, drop or queue cleanup
+                // Buffer full — consumer is not keeping up.
+                // The 1Hz throttle above makes this unlikely with unbounded AsyncStream,
+                // but retained as a defensive safety net.
             }
         }
     }

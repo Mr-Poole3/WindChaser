@@ -50,10 +50,14 @@ final class RideDatabase: @unchecked Sendable {
             heartRate INTEGER,
             cadence INTEGER,
             power INTEGER,
-            grade REAL
+            grade REAL,
+            received_at REAL NOT NULL DEFAULT 0
         );
         """
         try executeSQL(createSamplesSQL)
+
+        // Migrate pre-existing databases that lack the received_at column
+        try? executePragma("ALTER TABLE samples ADD COLUMN received_at REAL NOT NULL DEFAULT 0;")
 
         // Create summary table
         let createSummarySQL = """
@@ -78,8 +82,8 @@ final class RideDatabase: @unchecked Sendable {
 
         // Prepare compilation statements for single-second insertion
         let insertSQL = """
-        INSERT INTO samples (timestamp, latitude, longitude, altitude, speed, heartRate, cadence, power, grade)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+        INSERT INTO samples (timestamp, latitude, longitude, altitude, speed, heartRate, cadence, power, grade, received_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """
         if sqlite3_prepare_v2(db, insertSQL, -1, &insertSampleStmt, nil) != SQLITE_OK {
             let errorMsg = getErrorMessage()
@@ -174,6 +178,9 @@ final class RideDatabase: @unchecked Sendable {
         } else {
             sqlite3_bind_null(insertSampleStmt, 9)
         }
+
+        // 10. received_at REAL
+        sqlite3_bind_double(insertSampleStmt, 10, snapshot.receivedAt.timeIntervalSince1970)
 
         if sqlite3_step(insertSampleStmt) != SQLITE_DONE {
             throw RideDatabaseError.failedToExecute("Failed to insert sample: \(getErrorMessage())")
@@ -328,7 +335,7 @@ final class RideDatabase: @unchecked Sendable {
 
     nonisolated func readAllSamples() -> [BikeDataSnapshot] {
         guard let db else { return [] }
-        let sql = "SELECT timestamp, latitude, longitude, altitude, speed, heartRate, cadence, power, grade FROM samples ORDER BY timestamp ASC;"
+        let sql = "SELECT timestamp, latitude, longitude, altitude, speed, heartRate, cadence, power, grade, received_at FROM samples ORDER BY timestamp ASC;"
         var stmt: OpaquePointer?
         defer { sqlite3_finalize(stmt) }
 
@@ -346,8 +353,15 @@ final class RideDatabase: @unchecked Sendable {
             let pwr = sqlite3_column_type(stmt, 7) == SQLITE_NULL ? nil : Int(sqlite3_column_int(stmt, 7))
             let grade = sqlite3_column_type(stmt, 8) == SQLITE_NULL ? nil : sqlite3_column_double(stmt, 8)
 
+            // received_at: column index 9 (10th column); fallback to timestamp for pre-migration data
+            let receivedAtInterval = sqlite3_column_double(stmt, 9)
+            let receivedAt: Date = receivedAtInterval > 0
+                ? Date(timeIntervalSince1970: receivedAtInterval)
+                : timestamp
+
             list.append(BikeDataSnapshot(
                 timestamp: timestamp,
+                receivedAt: receivedAt,
                 latitude: latitude,
                 longitude: longitude,
                 altitude: altitude,

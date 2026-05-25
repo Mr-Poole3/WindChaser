@@ -1,93 +1,170 @@
-# Phase 2 PRD: Watch 中继 + 锁屏实时活动 — WindChaser
+# Phase 2 PRD: Watch 心率中继 + 锁屏实时活动 — WindChaser
 
 ## Problem Statement
 
-Phase 1 完成了 iPhone 端核心骑行功能（GPS 速度/距离、地图轨迹、仪表盘）。但骑行过程中用户通常把手机揣兜里或锁屏——每次看数据都要掏手机解锁很危险。而且心率带、踏频器、功率计等蓝牙外设的数据无法在 iPhone 上直接获取（外设只连 Apple Watch），仪表盘的心率/踏频/功率字段是空的。
+Phase 1 让 iPhone 端可以独立完成 GPS 骑行记录（速度、距离、轨迹、仪表盘、存储）。但仍然有三个体验空缺：
+
+1. 骑行时手机通常揣兜里或锁屏，每次查看数据都要掏手机解锁，不安全。
+2. iPhone 自身没有心率传感器，骑行报告里缺少这项核心健康指标。
+3. 骑行结束后，骑行记录没有写入系统健康 App / Activity 圆环，对 Apple 生态用户体验不完整。
 
 ## Solution
 
-Apple Watch 作为传感器中继站——通过 CoreBluetooth 连接心率带/踏频器/功率计，通过 WatchConnectivity 每秒推送传感器数据到 iPhone。iPhone 锁屏时通过 ActivityKit 实时活动在锁屏上展示核心骑行数据，无需解锁即可查看。HealthKit 作为心率数据的兜底通道——骑行结束后补齐 WCS 丢帧造成的空白。
+通过 Apple Watch 配套 App + ActivityKit + HealthKit 三件事配合：
+
+1. Watch 端启动 `HKWorkoutSession + HKLiveWorkoutBuilder` 读取内置心率，通过 WatchConnectivity 实时推送给 iPhone。
+2. iPhone 锁屏时通过 ActivityKit Live Activity 展示骑行核心数据（总时间、当前速度、总距离）。
+3. 骑行结束时写入完整 `HKWorkout`（含 `HKWorkoutRoute` 和心率样本），让记录进入系统健康 App 和 Activity 圆环。
+
+本阶段不接入任何 BLE 骑行外设；踏频 / 功率字段从 UI 中删除（数据模型字段保留，等 Phase 4 或之后再启用）。Watch 端为纯被动中继，不提供任何骑行控制 UI。
 
 ## User Stories
 
-1. 作为一名骑手，我在 Apple Watch 上打开配套 App，它自动连接我的蓝牙心率带、踏频器和功率计，界面上只显示一个连接状态指示灯，不需要任何操作
-2. 作为一名骑手，Watch 连接外设后，iPhone App 的预检面板能看到心率 🟢、踏频 🟢、功率 🟢 的状态，我知道传感器已经就绪
-3. 作为一名骑手，骑行时 iPhone 仪表盘实时显示心率、踏频和功率数据，数据来自 Watch 转发，延迟不超过 1 秒
-4. 作为一名骑手，骑行过程中心率数据如果短暂断开又恢复（比如经过信号干扰区），我能看到数据重新出现，并提供最终连续的数据
-5. 作为一名骑手，我在等红灯时手腕靠近 Watch 即可看到连接状态指示灯（当外设断连时，指示灯显示警告）
-6. 作为一名骑手，数据显示异常时——比如心率带断连超过 3 秒——仪表盘对应字段旁边出现一个灰色小圆点提示"数据已过期"，超过 3 秒后显示 "--"
-7. 作为一名骑手，锁屏后 iPhone 屏幕显示骑行实时活动，核心字段（速度、心率）在锁屏上持续刷新，不需要解锁手机
-8. 作为一名骑手，锁屏实时活动的刷新频率自适应：巡航时减少刷新省电，冲刺加速/急刹时立刻刷新
-9. 作为一名骑手，骑行结束后，除了表盘显示的实时心率，App 自动从 HealthKit 拉取完整心率数据，与 WCS 接收的数据合并，确保没有空白段
-10. 作为一名骑手，我在骑行详情页查看心率曲线时，曲线是连续完整的——即时骑行中途有 WCS 暂时断开的情况
+1. 作为骑手，我打开 Apple Watch 上的 WindChaser，首次会被引导开启 HealthKit 心率权限。
+2. 作为骑手，我在 iPhone 设备检测页能看到 Watch 心率的连接状态（未连接 / 需授权 / 已就绪），点击可看说明。
+3. 作为骑手，iPhone 上即使没戴 Watch 也能照常开始骑行；Watch 不可用时只在 UI 上提示心率不可用，不阻塞骑行。
+4. 作为骑手，骑行开始后，Watch 自动启动一次 cycling workout，开始读取并发送心率给 iPhone。
+5. 作为骑手，骑行中的展开仪表盘显示实时心率（来自 Watch）。
+6. 作为骑手，心率短暂丢帧时（0-3 秒），仪表盘显示最后已知值 + 灰点提示数据已过期。
+7. 作为骑手，丢帧超过 3 秒时，心率显示 `--`，恢复连接后立即清空灰点显示新值。
+8. 作为骑手，锁屏后能看到骑行 Live Activity：总时间、当前速度（大字）、总距离。
+9. 作为骑手，骑行暂停时锁屏 Live Activity 速度显示 `0.0` 并显示"已暂停"状态。
+10. 作为骑手，骑行结束后，记录自动写入 HealthKit（HKWorkout + HKWorkoutRoute + 心率样本），出现在系统健康 App 和 Activity 圆环。
+11. 作为骑手，骑行报告里的心率曲线是连续完整的——iPhone 在结束时从 HealthKit 拉取本次骑行时段内所有心率样本，补齐 WCS 实时通道丢失的段。
+12. 作为骑手，我可以在设置里关闭锁屏实时活动。
 
 ## Implementation Decisions
 
-### Watch 中继 App
+### Watch App 角色与 UI
 
-- **App 形态**：极简纯中继模式。启动后只显示连接状态指示灯（心率/踏频/功率各自的连接状态）。无其他 UI，用户不与其交互。
-- **传感器连接**：Watch 端 CoreBluetooth 连接 BLE 心率带（Heart Rate Service）、踏频/速度传感器（Cycling Speed and Cadence Service）、功率计（Cycling Power Service）。均遵循蓝牙 SIG 标准协议。
-- **数据推送**：每秒一次，通过 `WCSession.sendMessage(_:replyHandler:)` 发送自定义 payload 给 iPhone。
+- **角色**：纯心率中继。无开始 / 暂停 / 结束按钮，这些归 Phase 4。
+- **UI**：单页极简状态灯
+  - 顶部 WindChaser logo
+  - 中央状态圆点（绿 / 黄 / 红）+ 主文案：`心率传输中` / `等待 iPhone` / `需授权` / `连接中断`
+  - 副文案 `由 iPhone 控制骑行`
+  - 心率传输状态时同时显示当前 `bpm`
+- **AppIcon**：复用 iOS 端品牌图形，按 watchOS 尺寸重新导出。允许 Phase 2 收尾前补齐完整尺寸集，不阻塞主功能开发。
+
+### 心率数据源
+
+- Watch 端 `HKWorkoutSession(activityType: .cycling)` + `HKLiveWorkoutBuilder`
+- iPhone 端 `RideSession` 开始时通过 WCS 命令触发 Watch 启动 workout
+- iPhone 端 pause / resume / end 同样通过命令同步给 Watch
+- Watch App 启动时如果发现本地存在未结束的 workout（上次崩溃或失联），自愈清理
+
+### WatchConnectivity 通道
+
+- **心率推送 Watch → iPhone**：`sendMessage(_:replyHandler:)` 每秒一次
+  - 不带 replyHandler 以减少握手延迟
+  - 不可达时直接丢弃，不重试、不排队
+- **控制命令 iPhone → Watch**：`sendMessage` 单向
+  - 不可达时也不排队
+- payload 结构示例：
 
 ```swift
-// Payload 结构 (Watch → iPhone, 每秒一次)
-let payload: [String: Any] = [
-    "hr": 142,        // 心率 bpm (来自 BLE HR Service)
-    "cadence": 87,    // 踏频 rpm (来自 BLE CSC Service)
-    "power": 210,     // 功率 watts (来自 BLE CP Service)
-    "timestamp": Date().timeIntervalSince1970
-]
+struct HeartRateRelayMessage: Codable {
+    let bpm: Int
+    let watchTimestamp: Date
+    let sessionID: UUID  // 与 RideSession 对应
+}
+
+enum RideControlCommand: Codable {
+    case start(sessionID: UUID, startedAt: Date)
+    case pause
+    case resume
+    case end
+}
 ```
 
-### WCS 数据通道
+### 双端不可达策略
 
-- **WCSessionManager actor**：iPhone 端管理所有 WCSessionDelegate 回调。收到 payload 后写入共享数据流。
-- **WCS 不可达时的策略**：消息队列满或设备失联时，sendMessage 抛出错误。不重试（让下一秒的推送自然覆盖）。
+- **Watch 不可达 / Watch App 未打开 / 未授权**：iPhone 骑行照常进行，心率 UI 显示 `--` / `未连接`，仅在设备检测页与骑行展开面板上以视觉状态提示。
+- **Watch 心率丢帧**：
+  - 0-3 秒：显示最后已知值 + 灰色小圆点（数据已过期）
+  - >3 秒：显示 `--`
+  - 恢复后立即清空灰点，显示新值
+- **首次使用**：用户必须在 Watch 上手动打开一次 WindChaser 并授予 HealthKit 心率读取权限。iPhone 设备检测页提供引导说明。
 
-### 数据新鲜度 UI
+### 时间边界与心率合并
 
-- **分层策略（D 方案）**：
-  - 断开 0-3 秒：显示最后已知值 + 灰色小圆点（表示"数据已过期"）
-  - 断开 > 3 秒：字段显示 "--"
-  - 恢复连接后：立即显示新数据，移除灰点和 "--"
-- 每个传感器字段独立判断新鲜度（心率可能恢复、踏频仍断开）。
+- **iPhone RideSession 是主时间线**：骑行开始时间、暂停 / 继续累计时间、结束时间，全部以 iPhone 为准。
+- HealthKit 回填查询窗口使用 `[startedAt - 30s, endedAt + 30s]` 宽松窗口，抵抗 WCS 延迟与 Watch 启动慢。
+- 心率合并策略：按 1 秒分桶
+  - WCS 实时心率优先保留
+  - 缺失桶用 HK 样本填充
+- SQLite samples 表新增 `heart_rate_source` 字段：`wcs | healthkit | none`，方便排查与可选 UI 展示。
 
-### HealthKit 兜底
+### HealthKit 集成
 
-- **HKWorkout 关联**：骑行结束时，`HKWorkout` 由 **Phase 4** 创建。心率样本在骑行过程中已由 Watch 自动写入 HealthKit（系统行为）。
-- **对账逻辑**：骑行结束后，用 `HKSampleQuery` 查询该时间段内 HealthKit 中的所有心率样本。与 WCS 接收的心率数据按时间戳合并（以 HealthKit 为准填补 WCS 空白段）。
-- **注意**：踏频和功率没有 HealthKit 原生数据类型（截至 iOS 18），无兜底通道。WCS 丢帧意味着踏频/功率空白段无法补齐。
+- **骑行结束时写入完整 HKWorkout**：
+  - 类型 `.cycling`
+  - 距离 `HKQuantityTypeIdentifier.distanceCycling`
+  - 时长 `duration`
+  - 卡路里 `HKQuantityTypeIdentifier.activeEnergyBurned`（基于时长 + MET 估算公式；Phase 4 接入功率后可精确化）
+  - `HKWorkoutRoute` 写入完整 GPS 轨迹
+  - 关联合并后的心率样本
+- **权限**：启动时申请 `read: heartRate`，`write: workouts, workoutRoute, distanceCycling, activeEnergyBurned`
+- **未授权**：不阻塞骑行；结束时跳过 HealthKit 写入，UI 给一次可点击的设置入口提示。
 
-### ActivityKit 锁屏实时活动
+### ActivityKit 锁屏 Live Activity
 
-- **刷新策略（B+C 方案）**：
-  - 分层调度：核心字段（速度）每 1 秒更新、次要字段（心率/功率）每 3 秒更新、准静态字段（里程/爬升）每 10 秒更新
-  - 变化阈值叠加：速度变化 > 2 km/h、功率变化 > 10W 时强制刷新（无视调度间隔）
-  - 巡航时无意义变化不推，突发情况立刻推
-- **显示字段**：锁屏组件显示速度（大字）+ 心率 + 距离。与 App 主界面浮层的 4 字段一致。
+- **字段**：`总时间` + `当前速度`（大字） + `总距离`。**不显示心率**。
+- **时间字段**：使用 `Text(timerInterval:)` 本地自渲染，不消耗 ActivityKit 推送配额。
+- **刷新策略**：默认每 5 秒推送一次；当下列任一事件发生时立即推送：
+  - 速度变化 > 2 km/h
+  - 骑行状态切换（暂停 / 继续 / 结束）
+- **生命周期**：
+  - `RideSession.startRide()` 成功后立即创建
+  - 暂停时保留卡片，速度字段显示 `0.0`，状态文案 `已暂停`
+  - 继续时恢复正常更新
+  - 结束时立即结束并设置 `dismissalPolicy: .after(now + 10s)`，让用户短暂看到结束态
+- **设置开关**：默认开启；用户在骑行中关闭会立即结束当前 Live Activity，不影响骑行本身记录。
+- **灵动岛**：不做。
 
-### 集成到 Phase 1 管线
+### iPhone UI 调整
 
-- **RideViewModel 数据来源扩展**：原来的 `BikeDataSnapshot` 新增 `hr`, `cadence`, `power` 字段（Phase 1 已预留但为空），Phase 2 由 WCSManager 填充。
-- **仪表盘自定义扩展**：用户可在设置中选择是否显示心率/踏频/功率字段（如果没连接这些传感器，隐藏比显示 "--" 更好）。
+- **设备检测页**：
+  - 删除 `踏频传感器`、`功率计`、`速度传感器` 三行
+  - 只保留 `GPS信号` + `心率（Apple Watch）` 两行
+  - 心率行点击弹出说明：如何在 Watch 上打开 App、授权 HealthKit
+- **骑行展开仪表盘**：
+  - 8 宫格改为 6 项 2×3 布局：速度、距离、时长、心率、海拔、坡度
+  - 心率字段支持过期灰点状态
+- **骑行报告**：
+  - 移除"平均踏频 / 平均功率"行
+  - 心率曲线展示合并后的最终结果（不在历史界面显示实时灰点）
+- **设置页**：
+  - 新增 `锁屏实时活动` 开关，默认开启
+- **数据模型**：
+  - `BikeDataSnapshot.cadence / power` 字段保留，UI 不显示
+  - SQLite schema 不动，避免数据库迁移
+
+### Xcode 项目结构
+
+- 新增 `Shared/` 目录，跨 target 共享模型（`WatchMessage`, `HeartRateRelayState`, `RideActivityAttributes`, `SensorFreshness` 等），通过 file system synchronized group 同时加入 iOS / Watch / Widget target。
+- 新增 `WindChaser Watch App` target（watchOS App）。
+- 新增 `WindChaserLiveActivity` Widget Extension target（仅 iOS）。
 
 ## Testing Decisions
 
-- WCS payload 解析正确性（模拟 Watch 端发送的各种数据组合）
-- 数据新鲜度时间窗口逻辑（0-3 秒冻结、>3 秒 "--"、恢复清空）
-- HealthKit 心率对账合并逻辑（WCS 数据 + HK 数据按时间戳合并的正确性）
-- ActivityKit 更新调度器（分层 + 阈值叠加的刷新决策逻辑）
-- 不 mock WCSession（系统框架行为不测）、不 mock CoreBluetooth
+- WCS payload 序列化 / 反序列化往返
+- 心率新鲜度判断（0-3s 灰点 / >3s `--` / 恢复清空）
+- HealthKit 心率合并逻辑（WCS + HK 按 1s 分桶合并）
+- HKWorkout + HKWorkoutRoute 写入流程（含权限缺失场景的降级）
+- ActivityKit 刷新触发逻辑（5s 间隔 + 速度阈值 + 状态切换强制）
+- 不 mock WCSession / HealthKit / ActivityKit / CoreLocation；端到端测试在真机上完成
 
 ## Out of Scope
 
-- Watch 独立码表 UI（Phase 4）
-- 灵动岛（不做）
-- 踏频/功率数据的跨设备冗余存储（只有一个通道——WCS）
-- HealthKit 踏频/功率类型（iOS 系统不支持）
+- BLE 骑行外设接入（心率带 / 踏频器 / 功率计）— 推迟到 Phase 4 之后
+- Watch 端开始 / 暂停 / 结束控制 UI — Phase 4
+- Watch 独立 GPS 与独立存储 — Phase 4
+- 灵动岛
+- 锁屏 Live Activity 显示心率（仅 App 内仪表盘显示）
 
 ## Further Notes
 
-- Watch App 必须配置 Background Mode：`Uses Bluetooth LE accessories`
-- iPhone App 必须配置 Background Mode：`Location updates`（已有 Phase 1）+ `Uses Bluetooth LE accessories`（新增，确保后台也能接收 WCS 数据）
-- ActivityKit 本地更新节流：系统可能在高频更新 10 分钟后降频。变化阈值策略可缓解，但不保证突破系统限制
+- iPhone Background Modes：保留 Phase 1 的 `Location updates`；不依赖额外后台模式让 Live Activity 工作（ActivityKit 由系统调度）
+- Watch Background Modes：`Workout Processing`
+- ActivityKit 高频更新有系统节流限制；5s 平均频率 + 阈值策略远低于触发阈值
+- `cadence / power` 字段保留以便 Phase 4 BLE 接入或其他来源补全时无需 schema 变更

@@ -118,9 +118,7 @@ public final class RideSession {
             let previous = CLLocation(latitude: lastSampleCoordinate.latitude, longitude: lastSampleCoordinate.longitude)
             let current = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
             let delta = current.distance(from: previous)
-            if delta > 0.5 {
-                metrics.distanceMeters += delta
-            }
+            metrics.distanceMeters += delta
         }
         lastSampleCoordinate = coord
 

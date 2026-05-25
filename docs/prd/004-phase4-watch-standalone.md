@@ -42,15 +42,17 @@ Apple Watch 在检测不到 iPhone 时自动切换为独立码表模式——启
 
 - **GPS**：`CLLocationManager` 在 Watch 端独立运行，使用 `kCLLocationAccuracyBestForNavigation`
 - **气压计**：`CMAltimeter` 在 Watch 端采集（大部分 Apple Watch 有气压计）
-- **传感器**：CoreBluetooth 外设在 Watch 端直接解析（同 Phase 2 中继模式的解析逻辑）
+- **心率**：复用 Phase 2 的 `HKWorkoutSession + HKLiveWorkoutBuilder`，不再走 WCS 转发，而是直接由 Watch 本地记录
+- **踏频 / 功率 / BLE 外设**：本阶段仍然不支持，留待未来阶段；`BikeDataSnapshot.cadence / power` 字段保留为 `nil`
 - **存储**：Watch 本地 SQLite 文件（或受限于 Watch 存储空间，可降到 CSV 文件）。一次骑行采样数据量：3 小时 × 3600 点 × ~100 bytes ≈ 360KB，Watch 完全能承受。
 
 ### 数据同步
 
-- **同步时机**：iPhone App 启动时检测 Watch 是否有未同步的骑行记录。通过 WCSession 的 `transferUserInfo(_:)` 传输元数据（非实时，适合大文件传输），采样数据用 `transferFile(_:metadata:)` 传输完整的 SQLite/CSV 文件。
-- **HealthKit 写入（iPhone + Watch 同步）**：
-  - iPhone 端骑行结束时写入 HKWorkout（距离、时长、卡路里），关联 GPS 路线（HKWorkoutRoute）及可用的心率样本。
-  - Watch 独立骑行同步到 iPhone 后，由 iPhone 端统一写入（与上述逻辑一致）。
+- **同步时机**：iPhone App 启动时检测 Watch 是否有未同步的骑行记录。通过 WCSession 的 `transferUserInfo(_:)` 传输元数据，采样数据用 `transferFile(_:metadata:)` 传输完整的 SQLite/CSV 文件。
+- **HealthKit 写入**：
+  - Phase 2 已经在 iPhone 端建立完整的 HKWorkout / HKWorkoutRoute / 心率合并写入管线。
+  - Watch 独立骑行同步到 iPhone 后，**复用同一管线**写入 HealthKit，不重复实现。
+  - 独立模式下 Watch 自己**不写 HealthKit**，避免与同步后 iPhone 写入造成重复条目。
 - **去重**：基于骑行开始时间戳 + 设备来源做去重。同一骑行不会重复导入。
 - **同步状态**：iPhone 历史列表中 Watch 来源的骑行卡片标注"⌚"图标，直到同步完成。
 
@@ -88,7 +90,7 @@ Apple Watch 在检测不到 iPhone 时自动切换为独立码表模式——启
 - Watch 的 ActivityKit 或复杂并发症（complications）
 - 蜂窝版 Watch 独立网络功能（不走互联网，纯本地）
 - Watch ↔ iPhone 实时双向数据合并（如果中途模式切换）
-- 蓝牙外设直接同时连接 Watch 和 iPhone
+- BLE 骑行外设接入（心率带 / 踏频器 / 功率计）— 推迟到更后阶段
 
 ## Further Notes
 
