@@ -1,0 +1,104 @@
+:root {
+  /* 背景色：与 background.png 左侧暗部色调保持一致，确保无缝衔接 */
+  --bg-base: #060606;
+  --bg-elevated: #0d0d0d;
+  --bg-card: rgba(20, 20, 20, 0.55);
+  --bg-card-border: rgba(255, 255, 255, 0.06);
+
+  --text-primary: #ffffff;
+  --text-secondary: rgba(255, 255, 255, 0.72);
+  --text-tertiary: rgba(255, 255, 255, 0.48);
+  --text-muted: rgba(255, 255, 255, 0.32);
+
+  --accent: #ffffff;
+  --divider: rgba(255, 255, 255, 0.08);
+
+  --max-width: 1240px;
+  /* 导航栏高度也随宽度自适应：移动 56px → 桌面 72px */
+  --nav-height: clamp(56px, 6.4vw, 72px);
+  /* 流式水平内边距：移动 16px → 桌面 32px */
+  --page-padding-x: clamp(16px, 3vw, 32px);
+
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 24px;
+  --radius-pill: 999px;
+
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text',
+    'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Segoe UI', Roboto,
+    Helvetica, Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  background-color: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  min-height: 100%;
+}
+
+body {
+  overflow-x: hidden;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: inherit;
+}
+
+img,
+svg {
+  display: block;
+  max-width: 100%;
+}
+
+::selection {
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+}
+
+/* 非 CJK 字符：去掉为中文设计的宽字距 / 大 letter-spacing，避免英文被拉散 */
+html[lang='en'] .hero__subtitle,
+html[lang='en'] .hero__title {
+  letter-spacing: 0.5px;
+}
+
+html[lang='en'] .features__title,
+html[lang='en'] .feature__title,
+html[lang='en'] .stat__label {
+  letter-spacing: 0.3px;
+}
+
+/* 自定义滚动条（深色风格） */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.18);
+}

@@ -35,14 +35,15 @@ struct RouteMapView: View, Equatable {
     }
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
+        ZStack(alignment: .topLeading) {
             styledMap
                 .ignoresSafeArea()
 
             if mode == .liveTracking {
+                // 安全区上方 + GPS 胶囊高度 + 16pt 间距，避免视觉重叠
                 mapControlButtons
-                    .padding(.top, 8)
-                    .padding(.trailing, 12)
+                    .padding(.top, 130)
+                    .padding(.leading, 16)
             }
         }
         .onAppear {
@@ -118,37 +119,45 @@ struct RouteMapView: View, Equatable {
     @ViewBuilder
     private var mapControlButtons: some View {
         VStack(spacing: 10) {
-            if followsRider {
-                Button {
-                    headingUpEnabled.toggle()
-                    updateCamera(force: true)
-                } label: {
-                    Image(systemName: headingUpEnabled ? "location.north.line.fill" : "location.north.fill")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 40, height: 40)
-                        .background(Color.black.opacity(0.55))
-                        .clipShape(Circle())
-                }
-                .accessibilityLabel(headingUpEnabled ? "车头朝上" : "正北朝上")
+            mapControlButton(
+                systemName: headingUpEnabled ? "location.north.line.fill" : "location.north.fill",
+                accessibilityLabel: headingUpEnabled ? "车头朝上" : "正北朝上"
+            ) {
+                headingUpEnabled.toggle()
+                updateCamera(force: true)
             }
 
-            if !followsRider {
-                Button {
-                    followsRider = true
-                    updateCamera(force: true)
-                } label: {
-                    Image(systemName: "location.fill")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 40, height: 40)
-                        .background(Color.black.opacity(0.55))
-                        .clipShape(Circle())
-                }
-                .accessibilityLabel("回到当前位置")
+            mapControlButton(
+                systemName: followsRider ? "scope" : "location.fill",
+                accessibilityLabel: followsRider ? "跟随中" : "回到当前位置"
+            ) {
+                followsRider = true
+                updateCamera(force: true)
             }
         }
-        .shadow(color: .black.opacity(0.2), radius: 6, y: 2)
+        .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
+    }
+
+    private func mapControlButton(
+        systemName: String,
+        accessibilityLabel: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 42, height: 42)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.black.opacity(0.72))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                )
+        }
+        .accessibilityLabel(accessibilityLabel)
     }
 
     private func updateCamera(force: Bool) {

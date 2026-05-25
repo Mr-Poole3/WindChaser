@@ -1,30 +1,33 @@
 import SwiftUI
 
+/// 骑行者当前位置标记：与设计稿一致的绿色脉冲圆点。
 struct RiderLocationMarker: View {
     let courseDegrees: Double?
     let headingUpEnabled: Bool
 
+    @State private var pulse = false
+
+    private let accent = AppPalette.shared.accentColor
+
     var body: some View {
         ZStack {
             Circle()
-                .fill(RideButtonStyle.routeOrange)
-                .frame(width: 38, height: 38)
-                .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
+                .fill(accent.opacity(0.18))
+                .frame(width: 56, height: 56)
+                .scaleEffect(pulse ? 1.35 : 0.85)
+                .opacity(pulse ? 0 : 0.9)
 
             Circle()
-                .stroke(Color.white.opacity(0.9), lineWidth: 2)
-                .frame(width: 38, height: 38)
+                .stroke(Color.white.opacity(0.95), lineWidth: 3)
+                .frame(width: 22, height: 22)
 
-            Image(systemName: "bicycle")
-                .font(.system(size: 17, weight: .bold))
-                .foregroundStyle(.white)
-                .rotationEffect(.degrees(markerRotation))
+            Circle()
+                .fill(accent)
+                .frame(width: 18, height: 18)
+                .shadow(color: accent.opacity(0.6), radius: 8)
         }
-    }
-
-    private var markerRotation: Double {
-        guard !headingUpEnabled, let courseDegrees else { return 0 }
-        return courseDegrees
+        .animation(.easeOut(duration: 1.6).repeatForever(autoreverses: false), value: pulse)
+        .onAppear { pulse = true }
     }
 }
 

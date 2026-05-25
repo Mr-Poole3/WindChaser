@@ -8,6 +8,7 @@ struct WindChaserApp: App {
         WindowGroup {
             ContentView()
                 .environment(appModel)
+                .preferredColorScheme(.dark)
         }
     }
 }

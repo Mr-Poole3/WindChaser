@@ -2,129 +2,254 @@ import SwiftUI
 
 struct PreflightView: View {
     @Environment(AppModel.self) private var appModel
-    @State private var isPulsing = false
 
-    private var palette: ThemePalette {
-        SolarTheme.palette()
-    }
+    private let palette = AppPalette.shared
 
     var body: some View {
-        VStack(spacing: 32) {
-            Spacer()
-
-            // 具有科技呼吸感的 GPS 图标
-            ZStack {
-                Circle()
-                    .stroke(statusColor.opacity(0.15), lineWidth: 4)
-                    .frame(width: 110, height: 110)
-                    .scaleEffect(isPulsing ? 1.3 : 0.9)
-                    .opacity(isPulsing ? 0 : 0.8)
-
-                Circle()
-                    .stroke(statusColor.opacity(0.25), lineWidth: 1)
-                    .frame(width: 90, height: 90)
-                    .scaleEffect(isPulsing ? 1.15 : 0.95)
-
-                Image(systemName: "location.circle.fill")
-                    .font(.system(size: 64))
-                    .foregroundStyle(statusColor)
-                    .shadow(color: statusColor.opacity(0.3), radius: isPulsing ? 12 : 4, y: 2)
-                    .scaleEffect(isPulsing ? 1.03 : 0.97)
-            }
-            .animation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true), value: isPulsing)
-
-            // 高大上的 GPS Cockpit 卡片
-            VStack(spacing: 16) {
-                VStack(spacing: 4) {
-                    Text("定位传感器")
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .tracking(2.0)
-                        .foregroundStyle(palette.secondaryText)
-                    Text(appModel.gpsStatus.rawValue.uppercased())
-                        .font(.system(.title3, design: .rounded).weight(.black))
-                        .foregroundStyle(statusColor)
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(spacing: 20) {
+                    sensorChecklistCard
+                        .padding(.top, 16)
                 }
-
-                Divider()
-                    .background(palette.borderColor)
-
-                Text("确认定位正常后即可开始记录。多传感器融合芯片将在后台提供精确的速度、功率及海拔坡度融合计算。")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(palette.secondaryText)
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(4)
-                    .padding(.horizontal, 16)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 24)
             }
-            .padding(.vertical, 24)
-            .padding(.horizontal, 20)
-            .background(palette.cardBackground)
-            .clipShape(RoundedRectangle(cornerRadius: 18))
-            .overlay(
-                RoundedRectangle(cornerRadius: 18)
-                    .stroke(palette.borderColor, lineWidth: 1)
-            )
-            .shadow(color: .black.opacity(palette == .nightDark ? 0.35 : 0.03), radius: 15, y: 6)
-            .padding(.horizontal, 24)
 
-            Spacer()
-
-            // 独家定制的极简酷炫大型开始按钮
-            Button(action: {
-                guard !appModel.isStartingRide else { return }
-                UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-                appModel.startRide()
-            }) {
-                Group {
-                    if appModel.isStartingRide {
-                        ProgressView()
-                            .tint(palette == .nightDark ? Color.black : Color.white)
-                    } else {
-                        Text("开始新骑行".uppercased())
-                            .font(.system(size: 15, weight: .black, design: .monospaced))
-                            .tracking(2.0)
-                    }
-                }
-                .foregroundStyle(palette == .nightDark ? Color.black : Color.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 18)
-                .background(
-                    Capsule()
-                        .fill(palette == .nightDark ? palette.accentColor : palette.primaryText)
-                )
-                .shadow(color: (palette == .nightDark ? palette.accentColor : palette.primaryText).opacity(0.35), radius: 12, y: 4)
-            }
-            .disabled(appModel.isStartingRide)
-            .buttonStyle(ScaleButtonStyle())
-            .padding(.horizontal, 24)
-            .padding(.bottom, 24)
+            startRideButton
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 16)
         }
-        .onAppear {
-            isPulsing = true
-        }
-        .navigationTitle("骑行")
+        .background(palette.panelBackground.ignoresSafeArea())
+        .navigationTitle("设备检测")
         .navigationBarTitleDisplayMode(.inline)
-        .background(palette.panelBackground)
+        .toolbarBackground(palette.panelBackground, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
     }
 
-    private var statusColor: Color {
+    // MARK: - Sensor Checklist Card
+
+    private var sensorChecklistCard: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(sensors.enumerated()), id: \.element.id) { index, sensor in
+                SensorChecklistRow(item: sensor, palette: palette)
+
+                if index < sensors.count - 1 {
+                    Rectangle()
+                        .fill(palette.borderColor)
+                        .frame(height: 1)
+                        .padding(.leading, 64)
+                }
+            }
+        }
+        .background(palette.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(palette.borderColor, lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.35), radius: 14, y: 6)
+    }
+
+    /// 设备状态清单。
+    /// - GPS：使用 `AppModel.gpsStatus` 的真实状态。
+    /// - 心率带 / 踏频 / 功率 / 速度：当前版本尚未接入 BLE 外设管理，
+    ///   一律真实地展示"未连接"，避免出现任何捏造数据。
+    private var sensors: [SensorChecklistItem] {
+        [
+            SensorChecklistItem(
+                id: "gps",
+                icon: "location.fill",
+                title: "GPS信号",
+                state: gpsChecklistState
+            ),
+            SensorChecklistItem(
+                id: "heart",
+                icon: "heart.fill",
+                title: "心率带",
+                state: .disconnected(detail: "未连接")
+            ),
+            SensorChecklistItem(
+                id: "cadence",
+                icon: "arrow.triangle.2.circlepath",
+                title: "踏频传感器",
+                state: .disconnected(detail: "未连接")
+            ),
+            SensorChecklistItem(
+                id: "power",
+                icon: "bolt.fill",
+                title: "功率计",
+                state: .disconnected(detail: "未连接")
+            ),
+            SensorChecklistItem(
+                id: "speed",
+                icon: "speedometer",
+                title: "速度传感器",
+                state: .disconnected(detail: "未连接")
+            )
+        ]
+    }
+
+    private var gpsChecklistState: SensorChecklistState {
         switch appModel.gpsStatus {
         case .ready:
-            palette == .nightDark ? palette.accentColor : .green
-        case .searching:
-            .orange
+            return .connected(detail: "已连接")
         case .weak:
-            .yellow
+            return .warning(detail: "信号较弱")
+        case .searching:
+            return .warning(detail: "搜索中")
         case .unavailable:
-            .red
+            return .disconnected(detail: "未连接")
+        }
+    }
+
+    // MARK: - Start Ride Button
+
+    private var startRideButton: some View {
+        Button(action: {
+            guard !appModel.isStartingRide else { return }
+            UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+            appModel.startRide()
+        }) {
+            Group {
+                if appModel.isStartingRide {
+                    ProgressView()
+                        .tint(.black)
+                } else {
+                    Text("开始骑行")
+                        .font(.system(size: 17, weight: .semibold, design: .rounded))
+                }
+            }
+            .foregroundStyle(Color.black)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 18)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color.white)
+            )
+            .shadow(color: Color.white.opacity(0.18), radius: 12, y: 6)
+        }
+        .disabled(appModel.isStartingRide)
+        .buttonStyle(ScaleButtonStyle())
+    }
+}
+
+// MARK: - Sensor Checklist Models
+
+private struct SensorChecklistItem: Identifiable {
+    let id: String
+    let icon: String
+    let title: String
+    let state: SensorChecklistState
+}
+
+private enum SensorChecklistState {
+    case connected(detail: String)
+    case warning(detail: String)
+    case disconnected(detail: String)
+
+    var detail: String {
+        switch self {
+        case .connected(let detail), .warning(let detail), .disconnected(let detail):
+            return detail
+        }
+    }
+
+    var indicatorColor: Color {
+        switch self {
+        case .connected:
+            return AppPalette.shared.accentColor
+        case .warning:
+            return AppPalette.shared.warningColor
+        case .disconnected:
+            return Color(red: 0.40, green: 0.40, blue: 0.44)
+        }
+    }
+
+    var isActive: Bool {
+        switch self {
+        case .connected, .warning:
+            return true
+        case .disconnected:
+            return false
         }
     }
 }
 
-// 按钮微缩放手感交互
+private struct SensorChecklistRow: View {
+    let item: SensorChecklistItem
+    let palette: AppPalette
+
+    var body: some View {
+        HStack(spacing: 14) {
+            iconBadge
+
+            Text(item.title)
+                .font(.system(size: 16, weight: .semibold, design: .rounded))
+                .foregroundStyle(palette.primaryText)
+
+            Spacer(minLength: 8)
+
+            statusPill
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+        .contentShape(Rectangle())
+    }
+
+    private var iconBadge: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(badgeFill)
+                .frame(width: 36, height: 36)
+
+            Image(systemName: item.icon)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(badgeForeground)
+        }
+    }
+
+    private var badgeFill: Color {
+        item.state.isActive ? item.state.indicatorColor.opacity(0.16) : palette.borderColor
+    }
+
+    private var badgeForeground: Color {
+        item.state.isActive ? item.state.indicatorColor : palette.secondaryText
+    }
+
+    private var statusPill: some View {
+        HStack(spacing: 8) {
+            Text(item.state.detail)
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .foregroundStyle(item.state.isActive ? palette.primaryText : palette.secondaryText)
+                .lineLimit(1)
+
+            Circle()
+                .fill(item.state.indicatorColor)
+                .frame(width: 8, height: 8)
+                .shadow(
+                    color: item.state.isActive ? item.state.indicatorColor.opacity(0.6) : .clear,
+                    radius: 4
+                )
+        }
+    }
+}
+
+// MARK: - Button Style
+
 struct ScaleButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? 0.96 : 1.0)
-            .animation(.spring(response: 0.15, dampingFraction: 0.6), value: configuration.isPressed)
+            .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
+            .animation(.spring(response: 0.18, dampingFraction: 0.7), value: configuration.isPressed)
     }
+}
+
+#Preview {
+    NavigationStack {
+        PreflightView()
+    }
+    .environment(AppModel())
+    .preferredColorScheme(.dark)
 }

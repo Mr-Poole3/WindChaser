@@ -47,6 +47,8 @@ final class AppModel {
         }
     }
 
+    /// 设备检测页按下「开始骑行」后：完成 GPS 预热、写入 RideStore、启动计时，
+    /// 然后导航到骑行主界面。到达页面时已经处于 `.riding` 状态。
     func startRide() {
         guard !isStartingRide, rideSession == nil else { return }
 

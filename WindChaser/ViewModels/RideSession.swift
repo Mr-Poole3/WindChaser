@@ -5,7 +5,8 @@ import CoreLocation
 @Observable
 @MainActor
 public final class RideSession {
-    private(set) var state: RideState = .riding
+    /// 进入页面但用户尚未按"开始"前保持 `.idle`。
+    private(set) var state: RideState = .idle
     private(set) var metrics = LiveMetrics()
     private(set) var routeCoordinates: [MapCoordinate] = []
     private(set) var currentCoordinate: MapCoordinate?
@@ -26,21 +27,37 @@ public final class RideSession {
     }
 
     var isPaused: Bool { state == .paused }
+    var isRecording: Bool { state == .riding || state == .paused }
 
+    // MARK: - Recording lifecycle
+
+    /// 完成定位预热并启动计时与轨迹采集。
+    ///
+    /// 用户在设备检测页按下 `开始骑行` 后调用此方法：
+    /// 1. 等待一次精准 GPS 锁定
+    /// 2. 订阅传感器流
+    /// 3. 写入 RideStore，进入 `.riding`，启动计时器
+    ///
+    /// 成功返回 `true` 后，调用方应导航到骑行主界面。
     func prepare() async -> Bool {
         await SensorEngine.shared.requestFreshLocationFix()
         if let seed = await SensorEngine.shared.awaitAccurateCoordinate() {
-            routeCoordinates = [seed]
             currentCoordinate = seed
             lastSampleCoordinate = seed
             lastMapCoordinateAt = Date()
         }
+        listenToSensorStream()
 
         do {
             let id = try await RideStore.shared.startRide()
             rideID = id
+            startedAt = Date()
+            pausedAccumulated = 0
+            metrics.elapsed = 0
+            metrics.distanceMeters = 0
+            routeCoordinates = currentCoordinate.map { [$0] } ?? []
+            state = .riding
             startElapsedTimer()
-            listenToSensorStream()
             return true
         } catch {
             print("Failed to start ride in RideStore: \(error)")
@@ -52,9 +69,9 @@ public final class RideSession {
         elapsedTimer?.cancel()
         elapsedTimer = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 100_000_000) // 100ms for smooth updates
+                try? await Task.sleep(nanoseconds: 100_000_000)
                 guard !Task.isCancelled, let self else { break }
-                
+
                 await MainActor.run {
                     guard self.state == .riding else { return }
                     self.metrics.elapsed = Date().timeIntervalSince(self.startedAt) - self.pausedAccumulated
@@ -76,6 +93,9 @@ public final class RideSession {
     }
 
     private func handleSnapshot(_ snapshot: BikeDataSnapshot) async {
+        let coord = MapCoordinate(latitude: snapshot.latitude, longitude: snapshot.longitude)
+        currentCoordinate = coord
+
         let storeState = await RideStore.shared.getCurrentState()
         if storeState == .ended && self.state != .ended {
             self.state = .ended
@@ -93,9 +113,6 @@ public final class RideSession {
         metrics.altitude = snapshot.altitude
         metrics.grade = snapshot.grade
         metrics.courseDegrees = snapshot.course
-
-        let coord = MapCoordinate(latitude: snapshot.latitude, longitude: snapshot.longitude)
-        currentCoordinate = coord
 
         if let lastSampleCoordinate {
             let previous = CLLocation(latitude: lastSampleCoordinate.latitude, longitude: lastSampleCoordinate.longitude)
@@ -185,6 +202,12 @@ public final class RideSession {
         elapsedTimer = nil
         subscriptionTask?.cancel()
         subscriptionTask = nil
+
+        // 若用户从未按下"开始"直接退出，则没有可总结的记录
+        guard isRecording || state == .ended else {
+            state = .ended
+            return nil
+        }
 
         state = .ended
 
