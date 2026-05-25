@@ -54,8 +54,8 @@ struct PreflightView: View {
 
     /// 设备状态清单。
     /// - GPS：使用 `AppModel.gpsStatus` 的真实状态。
-    /// - 心率带 / 踏频 / 功率 / 速度：当前版本尚未接入 BLE 外设管理，
-    ///   一律真实地展示"未连接"，避免出现任何捏造数据。
+    /// - 心率（Apple Watch）：本阶段尚未接入 Watch 心率链路（Phase 2 / S4 后启用），
+    ///   暂时统一展示"未连接"，避免任何捏造数据。完整 4 态显示与点击说明由 S6 接入。
     private var sensors: [SensorChecklistItem] {
         [
             SensorChecklistItem(
@@ -67,25 +67,7 @@ struct PreflightView: View {
             SensorChecklistItem(
                 id: "heart",
                 icon: "heart.fill",
-                title: "心率带",
-                state: .disconnected(detail: "未连接")
-            ),
-            SensorChecklistItem(
-                id: "cadence",
-                icon: "arrow.triangle.2.circlepath",
-                title: "踏频传感器",
-                state: .disconnected(detail: "未连接")
-            ),
-            SensorChecklistItem(
-                id: "power",
-                icon: "bolt.fill",
-                title: "功率计",
-                state: .disconnected(detail: "未连接")
-            ),
-            SensorChecklistItem(
-                id: "speed",
-                icon: "speedometer",
-                title: "速度传感器",
+                title: "心率（Apple Watch）",
                 state: .disconnected(detail: "未连接")
             )
         ]

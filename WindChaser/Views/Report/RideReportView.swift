@@ -55,6 +55,8 @@ struct RideReportView: View {
                             }
 
                             // 3. 体能与动力卡片
+                            // Phase 2: 仅展示均心率 + 卡路里；均踏频 / 平均功率从 UI 中移除，
+                            // `RideSummary.averageCadence / averagePower` 字段保留供未来恢复。
                             reportGroupCard(
                                 title: "体能与动力",
                                 subtitle: "BIOMETRICS & WATTS",
@@ -63,8 +65,6 @@ struct RideReportView: View {
                             ) {
                                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)], spacing: 16) {
                                     reportCell("均心率", MetricFormatter.heartRate(summary.averageHeartRate), summary.averageHeartRate == nil ? "—" : "bpm")
-                                    reportCell("均踏频", MetricFormatter.cadence(summary.averageCadence), summary.averageCadence == nil ? "—" : "rpm")
-                                    reportCell("平均功率", MetricFormatter.power(summary.averagePower), summary.averagePower == nil ? "—" : "W")
                                     reportCell("卡路里", MetricFormatter.calories(summary.calories), "kcal")
                                 }
                             }

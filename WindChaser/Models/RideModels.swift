@@ -41,13 +41,16 @@ enum SensorConnectionStatus: String {
     case unavailable = "未连接"
 }
 
+/// 骑行主界面展开仪表盘展示的指标。
+///
+/// Phase 2 后仅展示 6 项（2×3 布局）：速度、里程、用时、心率、海拔、坡度。
+/// 踏频 / 功率字段从 UI 中移除，但 `BikeDataSnapshot` / `LiveMetrics` / `RideSummary`
+/// 中相应字段保留，等接入后续数据源时按需启用。
 enum DashboardMetric: String, CaseIterable, Identifiable {
     case speed = "速度"
     case distance = "里程"
     case duration = "用时"
     case heartRate = "心率"
-    case cadence = "踏频"
-    case power = "功率"
     case altitude = "海拔"
     case grade = "坡度"
 

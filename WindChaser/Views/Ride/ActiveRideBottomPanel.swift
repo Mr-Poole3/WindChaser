@@ -4,7 +4,8 @@ import SwiftUI
 ///
 /// 进入页面时骑行已经在记录中，因此面板只处理 `.riding` / `.paused` / `.ended` 三态：
 /// - 收起态：总时间 | 当前速度（放大居中） | 总距离 + 主按钮
-/// - 展开态：8 个详细骑行指标 + 主按钮
+/// - 展开态：6 个详细骑行指标 (2×3) + 主按钮
+///     - Phase 2 起仅显示：速度 / 里程 / 用时 / 心率 / 海拔 / 坡度
 /// - 主按钮按 `RideState` 切换：
 ///     - `.riding` → 「暂停」
 ///     - `.paused` → 「继续」+「长按结束」(2s)
@@ -214,10 +215,6 @@ struct ActiveRideBottomPanel: View {
             MetricFormatter.duration(metrics.elapsed)
         case .heartRate:
             MetricFormatter.heartRate(metrics.heartRate)
-        case .cadence:
-            MetricFormatter.cadence(metrics.cadence)
-        case .power:
-            MetricFormatter.power(metrics.power)
         case .altitude:
             MetricFormatter.altitude(meters: metrics.altitude)
         case .grade:
@@ -235,10 +232,6 @@ struct ActiveRideBottomPanel: View {
             ""
         case .heartRate:
             metrics.heartRate == nil ? "" : "bpm"
-        case .cadence:
-            metrics.cadence == nil ? "" : "rpm"
-        case .power:
-            metrics.power == nil ? "" : "W"
         case .altitude:
             metrics.altitude == nil ? "" : "m"
         case .grade:

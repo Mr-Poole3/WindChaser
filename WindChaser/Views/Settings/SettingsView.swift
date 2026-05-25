@@ -13,6 +13,8 @@ struct SettingsView: View {
             ScrollView {
                 VStack(spacing: 24) {
                     // 1. Hardware Cockpit Diagnostics Section
+                    // Phase 2: 仅保留 GPS 与心率（Apple Watch）两项，与设备检测页对齐。
+                    // 踏频 / 功率 / 速度传感器从 UI 中移除；心率 4 态接入由 S6 完成。
                     settingsSectionCard(
                         title: "硬件与数据传感器",
                         subtitle: "SENSOR DIAGNOSTICS & TELEMETRY",
@@ -31,27 +33,7 @@ struct SettingsView: View {
 
                             sensorStatusRow(
                                 icon: "heart.fill",
-                                name: "蓝牙心率带 (HRM)",
-                                statusText: "未连接",
-                                active: false,
-                                activeColor: .red
-                            )
-
-                            dividerLine()
-
-                            sensorStatusRow(
-                                icon: "circle.hexagonpath",
-                                name: "无线踏频器 (CAD)",
-                                statusText: "未连接",
-                                active: false,
-                                activeColor: .red
-                            )
-
-                            dividerLine()
-
-                            sensorStatusRow(
-                                icon: "bolt.ring.closed",
-                                name: "双边功率计 (PWR)",
+                                name: "心率（Apple Watch）",
                                 statusText: "未连接",
                                 active: false,
                                 activeColor: .red
@@ -81,7 +63,7 @@ struct SettingsView: View {
                                     Text("自定义宫格配置与排序")
                                         .font(.system(size: 14, weight: .bold, design: .rounded))
                                         .foregroundStyle(palette.primaryText)
-                                    Text("调整 8 种骑行指标的显示顺序")
+                                    Text("调整 6 种骑行指标的显示顺序")
                                         .font(.system(size: 11, weight: .medium))
                                         .foregroundStyle(palette.secondaryText)
                                 }
