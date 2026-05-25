@@ -67,6 +67,34 @@ final class WatchConnectivityStatus: NSObject {
         }
     }
 
+    /// 主动把当前 relay 状态推送给 iPhone，用于驱动设备检测页的 4 态显示。
+    func sendRelayState(_ state: WatchRelayState, detail: String? = nil) {
+        guard let session,
+              session.activationState == .activated,
+              session.isReachable else {
+            return
+        }
+
+        let message = WatchMessage.relayState(
+            WatchRelayStateMessage(
+                state: state,
+                detail: detail
+            )
+        )
+
+        do {
+            session.sendMessage(
+                try message.dictionaryPayload(),
+                replyHandler: nil,
+                errorHandler: { error in
+                    print("Failed to send relay state message: \(error)")
+                }
+            )
+        } catch {
+            print("Failed to encode relay state message: \(error)")
+        }
+    }
+
     private func receive(_ message: WatchMessage) {
         switch message {
         case .sessionContext(let context):

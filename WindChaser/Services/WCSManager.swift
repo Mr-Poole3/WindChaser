@@ -10,16 +10,40 @@ public enum WatchConnectionState: String, Sendable, Codable {
 
 /// iPhone 端 WatchConnectivity 管理器。
 ///
-/// S4 只接收 Watch 推送的实时心率并提供给 `RideSession`；暂停/继续/结束等控制命令由 S5 完成。
+/// S4 接收 Watch 推送的实时心率并提供给 `RideSession`；
+/// S6 在此基础上暴露细粒度信号（配对/可达/Watch 上报的 relay state/最近心率时间戳），
+/// 供设备检测页合成 4 态（未连接 / 需授权 / 已就绪 / 已连接）。
 @MainActor
+@Observable
 final class WCSManager: NSObject {
-    static let shared = WCSManager()
+    @MainActor static let shared = WCSManager()
 
+    /// 粗粒度状态枚举，保留供 UI/日志使用。
     private(set) var connectionState: WatchConnectionState = .disconnected
 
-    private let session: WCSession?
-    private var activeRideSessionID: UUID?
-    private var heartRateContinuations: [UUID: AsyncStream<HeartRateRelayMessage>.Continuation] = [:]
+    // MARK: - S6 fine-grained signals
+
+    /// WCSession 是否已激活。
+    private(set) var isActivated: Bool = false
+
+    /// iPhone 是否已配对 Watch。
+    private(set) var isPaired: Bool = false
+
+    /// 配对 Watch 是否已安装 Watch App。
+    private(set) var isWatchAppInstalled: Bool = false
+
+    /// 当前 WCS 链路是否可达（Watch App 是否在前台/可被唤醒）。
+    private(set) var isReachable: Bool = false
+
+    /// Watch 端最近一次上报的 relay 状态。
+    private(set) var lastReportedRelayState: WatchRelayState?
+
+    /// iPhone 最近一次收到心率的时间戳，用于判定『已连接』。
+    private(set) var lastHeartRateAt: Date?
+
+    @ObservationIgnored private let session: WCSession?
+    @ObservationIgnored private var activeRideSessionID: UUID?
+    @ObservationIgnored private var heartRateContinuations: [UUID: AsyncStream<HeartRateRelayMessage>.Continuation] = [:]
 
     private override init() {
         session = WCSession.isSupported() ? .default : nil
@@ -55,14 +79,28 @@ final class WCSManager: NSObject {
     }
 
     private func refreshConnectionState() {
-        guard let session, session.activationState == .activated else {
+        guard let session else {
+            isActivated = false
+            isPaired = false
+            isWatchAppInstalled = false
+            isReachable = false
+            connectionState = .disconnected
+            return
+        }
+
+        isActivated = session.activationState == .activated
+        isPaired = session.isPaired
+        isWatchAppInstalled = session.isWatchAppInstalled
+        isReachable = session.isReachable
+
+        guard isActivated else {
             connectionState = .pairing
             return
         }
 
-        if !session.isPaired || !session.isWatchAppInstalled {
+        if !isPaired || !isWatchAppInstalled {
             connectionState = .disconnected
-        } else if session.isReachable {
+        } else if isReachable {
             connectionState = .connected
         } else {
             connectionState = .pairing
@@ -92,12 +130,14 @@ final class WCSManager: NSObject {
         switch message {
         case .heartRate(let heartRate):
             guard heartRate.sessionID == activeRideSessionID else { return }
+            lastHeartRateAt = Date()
             connectionState = .activeWorkout
             for continuation in heartRateContinuations.values {
                 continuation.yield(heartRate)
             }
 
         case .relayState(let relayState):
+            lastReportedRelayState = relayState.state
             if relayState.state == .relaying {
                 connectionState = .activeWorkout
             } else {
@@ -124,6 +164,7 @@ extension WCSManager: WCSessionDelegate {
 
     nonisolated func sessionDidBecomeInactive(_: WCSession) {
         Task { @MainActor in
+            isReachable = false
             connectionState = .disconnected
         }
     }

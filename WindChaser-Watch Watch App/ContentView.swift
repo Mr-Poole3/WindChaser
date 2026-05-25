@@ -26,6 +26,14 @@ struct ContentView: View {
             }
             connectivity.sendHeartRate(bpm, watchTimestamp: timestamp)
         }
+        .onChange(of: relayState, initial: true) { _, newState in
+            connectivity.sendRelayState(newState)
+        }
+        .onChange(of: connectivity.isReachable) { _, becameReachable in
+            if becameReachable {
+                connectivity.sendRelayState(relayState)
+            }
+        }
     }
 
     // MARK: - Sections
