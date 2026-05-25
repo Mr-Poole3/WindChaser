@@ -54,7 +54,7 @@ let payload: [String: Any] = [
 
 ### HealthKit 兜底
 
-- **HKWorkout 关联**：骑行结束时，`HKWorkout` 已由 Phase 1 创建。心率样本在骑行过程中已由 Watch 自动写入 HealthKit（系统行为）。
+- **HKWorkout 关联**：骑行结束时，`HKWorkout` 由 **Phase 4** 创建。心率样本在骑行过程中已由 Watch 自动写入 HealthKit（系统行为）。
 - **对账逻辑**：骑行结束后，用 `HKSampleQuery` 查询该时间段内 HealthKit 中的所有心率样本。与 WCS 接收的心率数据按时间戳合并（以 HealthKit 为准填补 WCS 空白段）。
 - **注意**：踏频和功率没有 HealthKit 原生数据类型（截至 iOS 18），无兜底通道。WCS 丢帧意味着踏频/功率空白段无法补齐。
 

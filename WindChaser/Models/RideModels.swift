@@ -29,7 +29,7 @@ enum ReportMapExpansion: Equatable {
     case expanded
 }
 
-enum GPSStatus: String {
+public enum GPSStatus: String, Sendable {
     case searching = "定位中"
     case ready = "GPS 就绪"
     case weak = "信号较弱"
@@ -64,6 +64,7 @@ struct LiveMetrics: Equatable {
     var power: Int?
     var altitude: Double?
     var grade: Double?
+    var courseDegrees: Double?
 
     static let preview = LiveMetrics(
         elapsed: 3_725,
@@ -77,30 +78,73 @@ struct LiveMetrics: Equatable {
     )
 }
 
-struct RideSummary: Identifiable, Hashable {
-    let id: UUID
-    let startedAt: Date
-    let elapsed: TimeInterval
-    let distanceMeters: Double
-    let averageSpeedKmh: Double
-    let maxSpeedKmh: Double
-    let averageHeartRate: Int?
-    let averageCadence: Int?
-    let averagePower: Int?
-    let maxAltitude: Double
-    let maxGrade: Double
-    let totalAscentMeters: Double
-    let calories: Int
-    let routeCoordinates: [MapCoordinate]
+public struct RideSummary: Identifiable, Hashable, Sendable {
+    public let id: UUID
+    public let startedAt: Date
+    public let elapsed: TimeInterval
+    public let distanceMeters: Double
+    public let averageSpeedKmh: Double
+    public let maxSpeedKmh: Double
+    public let averageHeartRate: Int?
+    public let averageCadence: Int?
+    public let averagePower: Int?
+    public let maxAltitude: Double
+    public let maxGrade: Double
+    public let totalAscentMeters: Double
+    public let calories: Int
+    public let routeCoordinates: [MapCoordinate]
 
-    var averageSpeedDisplay: Double { averageSpeedKmh }
+    public var averageSpeedDisplay: Double { averageSpeedKmh }
+
+    nonisolated public init(
+        id: UUID,
+        startedAt: Date,
+        elapsed: TimeInterval,
+        distanceMeters: Double,
+        averageSpeedKmh: Double,
+        maxSpeedKmh: Double,
+        averageHeartRate: Int?,
+        averageCadence: Int?,
+        averagePower: Int?,
+        maxAltitude: Double,
+        maxGrade: Double,
+        totalAscentMeters: Double,
+        calories: Int,
+        routeCoordinates: [MapCoordinate]
+    ) {
+        self.id = id
+        self.startedAt = startedAt
+        self.elapsed = elapsed
+        self.distanceMeters = distanceMeters
+        self.averageSpeedKmh = averageSpeedKmh
+        self.maxSpeedKmh = maxSpeedKmh
+        self.averageHeartRate = averageHeartRate
+        self.averageCadence = averageCadence
+        self.averagePower = averagePower
+        self.maxAltitude = maxAltitude
+        self.maxGrade = maxGrade
+        self.totalAscentMeters = totalAscentMeters
+        self.calories = calories
+        self.routeCoordinates = routeCoordinates
+    }
 }
 
-struct MapCoordinate: Hashable {
-    let latitude: Double
-    let longitude: Double
+public struct MapCoordinate: Hashable, Sendable {
+    public let latitude: Double
+    public let longitude: Double
 
-    var clLocationCoordinate: CLLocationCoordinate2D {
+    nonisolated public init(latitude: Double, longitude: Double) {
+        self.latitude = latitude
+        self.longitude = longitude
+    }
+
+    /// Raw WGS-84 coordinate from GPS hardware.
+    public var clLocationCoordinate: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+    }
+
+    /// Coordinate adjusted for MapKit display (GCJ-02 in mainland China).
+    public var mapDisplayCoordinate: CLLocationCoordinate2D {
+        CoordinateConverter.wgs84ToGcj02(latitude: latitude, longitude: longitude)
     }
 }

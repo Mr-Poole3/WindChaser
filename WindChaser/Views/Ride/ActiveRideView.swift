@@ -12,11 +12,13 @@ struct ActiveRideView: View {
     var body: some View {
         ZStack {
             if let session = appModel.rideSession {
-                RouteMapView(
+                ActiveRideMapLayer(
                     coordinates: session.routeCoordinates,
+                    currentCoordinate: session.currentCoordinate,
+                    courseDegrees: session.metrics.courseDegrees,
                     palette: palette
                 )
-                .ignoresSafeArea()
+                .equatable()
 
                 RideDataSheet(
                     metrics: session.metrics,
@@ -31,7 +33,7 @@ struct ActiveRideView: View {
                 )
                 .ignoresSafeArea(edges: .bottom)
             } else {
-                ProgressView()
+                ProgressView("正在准备骑行…")
             }
         }
         .navigationBarBackButtonHidden(true)

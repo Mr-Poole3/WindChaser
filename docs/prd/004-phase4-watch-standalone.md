@@ -18,8 +18,9 @@ Apple Watch 在检测不到 iPhone 时自动切换为独立码表模式——启
 6. 作为一名骑手，Watch 独立骑行结束后，骑行记录保存在 Watch 本地
 7. 作为一名骑手，当我回到 iPhone 身边并打开 iPhone App 时，Watch 上的独立骑行自动同步到 iPhone，在历史列表中出现
 8. 作为一名骑手，同步完成后的骑行记录会自动写入 HealthKit 体能训练
-9. 作为一名骑手，如果我在 Watch 骑行中途 iPhone 恢复了连接（比如去车上拿了下手机），Watch 不切换到中继模式，保持独立记录直到本次骑行结束
-10. 作为一名骑手，Watch 独立骑行时 GPS 使用 Apple Watch 自带的定位（精度不如 iPhone 但在户外完全可用）
+9. 作为一名骑手，我在 iPhone 上结束一次骑行后，记录自动写入 HealthKit 体能训练并计入 Activity 圆环
+10. 作为一名骑手，如果我在 Watch 骑行中途 iPhone 恢复了连接（比如去车上拿了下手机），Watch 不切换到中继模式，保持独立记录直到本次骑行结束
+11. 作为一名骑手，Watch 独立骑行时 GPS 使用 Apple Watch 自带的定位（精度不如 iPhone 但在户外完全可用）
 
 ## Implementation Decisions
 
@@ -47,7 +48,9 @@ Apple Watch 在检测不到 iPhone 时自动切换为独立码表模式——启
 ### 数据同步
 
 - **同步时机**：iPhone App 启动时检测 Watch 是否有未同步的骑行记录。通过 WCSession 的 `transferUserInfo(_:)` 传输元数据（非实时，适合大文件传输），采样数据用 `transferFile(_:metadata:)` 传输完整的 SQLite/CSV 文件。
-- **HealthKit 写入**：同步到 iPhone 后，由 iPhone 端统一写入 HKWorkout（与 Phase 1 逻辑一致）。
+- **HealthKit 写入（iPhone + Watch 同步）**：
+  - iPhone 端骑行结束时写入 HKWorkout（距离、时长、卡路里），关联 GPS 路线（HKWorkoutRoute）及可用的心率样本。
+  - Watch 独立骑行同步到 iPhone 后，由 iPhone 端统一写入（与上述逻辑一致）。
 - **去重**：基于骑行开始时间戳 + 设备来源做去重。同一骑行不会重复导入。
 - **同步状态**：iPhone 历史列表中 Watch 来源的骑行卡片标注"⌚"图标，直到同步完成。
 

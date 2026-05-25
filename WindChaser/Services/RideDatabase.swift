@@ -9,21 +9,21 @@ enum RideDatabaseError: Error {
     case databaseNotOpen
 }
 
-final class RideDatabase {
-    let fileURL: URL
-    private var db: OpaquePointer?
-    private var insertSampleStmt: OpaquePointer?
+final class RideDatabase: @unchecked Sendable {
+    nonisolated let fileURL: URL
+    nonisolated(unsafe) private var db: OpaquePointer?
+    nonisolated(unsafe) private var insertSampleStmt: OpaquePointer?
 
-    init(fileURL: URL) throws {
+    nonisolated init(fileURL: URL) throws {
         self.fileURL = fileURL
         try openAndInitialize()
     }
 
-    deinit {
+    nonisolated deinit {
         close()
     }
 
-    private func openAndInitialize() throws {
+    nonisolated private func openAndInitialize() throws {
         // Ensure path exists
         let directoryURL = fileURL.deletingLastPathComponent()
         if !FileManager.default.fileExists(atPath: directoryURL.path) {
@@ -87,7 +87,7 @@ final class RideDatabase {
         }
     }
 
-    func close() {
+    nonisolated func close() {
         if let insertSampleStmt {
             sqlite3_finalize(insertSampleStmt)
             self.insertSampleStmt = nil
@@ -98,7 +98,7 @@ final class RideDatabase {
         }
     }
 
-    private func executePragma(_ pragma: String) throws {
+    nonisolated private func executePragma(_ pragma: String) throws {
         var stmt: OpaquePointer?
         if sqlite3_prepare_v2(db, pragma, -1, &stmt, nil) == SQLITE_OK {
             sqlite3_step(stmt)
@@ -106,14 +106,14 @@ final class RideDatabase {
         sqlite3_finalize(stmt)
     }
 
-    private func executeSQL(_ sql: String) throws {
+    nonisolated private func executeSQL(_ sql: String) throws {
         if sqlite3_exec(db, sql, nil, nil, nil) != SQLITE_OK {
             throw RideDatabaseError.failedToExecute(getErrorMessage())
         }
     }
 
-    private func getErrorMessage() -> String {
-        guard let db else { return "Database not open" }
+    nonisolated private func getErrorMessage() -> String {
+        guard db != nil else { return "Database not open" }
         if let err = sqlite3_errmsg(db) {
             return String(cString: err)
         }
@@ -122,8 +122,8 @@ final class RideDatabase {
 
     // MARK: - API Methods
 
-    func insertSample(_ snapshot: BikeDataSnapshot) throws {
-        guard let db, let insertSampleStmt else {
+    nonisolated func insertSample(_ snapshot: BikeDataSnapshot) throws {
+        guard db != nil, let insertSampleStmt else {
             throw RideDatabaseError.databaseNotOpen
         }
 
@@ -180,7 +180,7 @@ final class RideDatabase {
         }
     }
 
-    func writeSummary(_ summary: RideSummary, finalized: Bool) throws {
+    nonisolated func writeSummary(_ summary: RideSummary, finalized: Bool) throws {
         guard let db else {
             throw RideDatabaseError.databaseNotOpen
         }
@@ -238,7 +238,7 @@ final class RideDatabase {
         }
     }
 
-    func isFinalized() -> Bool {
+    nonisolated func isFinalized() -> Bool {
         guard let db else { return false }
         let sql = "SELECT finalized FROM summary LIMIT 1;"
         var stmt: OpaquePointer?
@@ -251,7 +251,7 @@ final class RideDatabase {
         return false
     }
 
-    func readSummary() -> RideSummary? {
+    nonisolated func readSummary() -> RideSummary? {
         guard let db else { return nil }
         let sql = """
         SELECT id, startedAt, elapsed, distanceMeters, averageSpeedKmh, maxSpeedKmh,
@@ -308,7 +308,7 @@ final class RideDatabase {
         return nil
     }
 
-    func readSamplesAsCoordinates() -> [MapCoordinate] {
+    nonisolated func readSamplesAsCoordinates() -> [MapCoordinate] {
         guard let db else { return [] }
         let sql = "SELECT latitude, longitude FROM samples ORDER BY timestamp ASC;"
         var stmt: OpaquePointer?
@@ -326,7 +326,7 @@ final class RideDatabase {
         return list
     }
 
-    func readAllSamples() -> [BikeDataSnapshot] {
+    nonisolated func readAllSamples() -> [BikeDataSnapshot] {
         guard let db else { return [] }
         let sql = "SELECT timestamp, latitude, longitude, altitude, speed, heartRate, cadence, power, grade FROM samples ORDER BY timestamp ASC;"
         var stmt: OpaquePointer?
@@ -355,7 +355,8 @@ final class RideDatabase {
                 heartRate: hr,
                 cadence: cad,
                 power: pwr,
-                grade: grade
+                grade: grade,
+                course: nil
             ))
         }
 
@@ -364,7 +365,7 @@ final class RideDatabase {
 
     // MARK: - Export Formats
 
-    func csvExportURL() -> URL? {
+    nonisolated func csvExportURL() -> URL? {
         let samples = readAllSamples()
         guard !samples.isEmpty else { return nil }
 
@@ -396,7 +397,7 @@ final class RideDatabase {
         }
     }
 
-    func gpxExportURL() -> URL? {
+    nonisolated func gpxExportURL() -> URL? {
         let samples = readAllSamples()
         let summary = readSummary()
         guard !samples.isEmpty else { return nil }

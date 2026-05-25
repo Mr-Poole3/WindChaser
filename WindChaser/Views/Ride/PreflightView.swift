@@ -1,7 +1,5 @@
 import SwiftUI
 
-import SwiftUI
-
 struct PreflightView: View {
     @Environment(AppModel.self) private var appModel
     @State private var isPulsing = false
@@ -72,21 +70,30 @@ struct PreflightView: View {
 
             // 独家定制的极简酷炫大型开始按钮
             Button(action: {
+                guard !appModel.isStartingRide else { return }
                 UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
                 appModel.startRide()
             }) {
-                Text("开始新骑行".uppercased())
-                    .font(.system(size: 15, weight: .black, design: .monospaced))
-                    .tracking(2.0)
-                    .foregroundStyle(palette == .nightDark ? Color.black : Color.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 18)
-                    .background(
-                        Capsule()
-                            .fill(palette == .nightDark ? palette.accentColor : palette.primaryText)
-                    )
-                    .shadow(color: (palette == .nightDark ? palette.accentColor : palette.primaryText).opacity(0.35), radius: 12, y: 4)
+                Group {
+                    if appModel.isStartingRide {
+                        ProgressView()
+                            .tint(palette == .nightDark ? Color.black : Color.white)
+                    } else {
+                        Text("开始新骑行".uppercased())
+                            .font(.system(size: 15, weight: .black, design: .monospaced))
+                            .tracking(2.0)
+                    }
+                }
+                .foregroundStyle(palette == .nightDark ? Color.black : Color.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 18)
+                .background(
+                    Capsule()
+                        .fill(palette == .nightDark ? palette.accentColor : palette.primaryText)
+                )
+                .shadow(color: (palette == .nightDark ? palette.accentColor : palette.primaryText).opacity(0.35), radius: 12, y: 4)
             }
+            .disabled(appModel.isStartingRide)
             .buttonStyle(ScaleButtonStyle())
             .padding(.horizontal, 24)
             .padding(.bottom, 24)

@@ -6,7 +6,10 @@ struct RideReportView: View {
     var onDone: (() -> Void)?
 
     @State private var mapExpansion: ReportMapExpansion = .compact
-    @State private var showsSharePlaceholder = false
+    @State private var shareImageURL: URL?
+    @State private var showsShareSheet = false
+    @State private var isGeneratingShare = false
+    @State private var shareErrorMessage: String?
 
     private var palette: ThemePalette {
         SolarTheme.palette()
@@ -127,10 +130,18 @@ struct RideReportView: View {
                 }
             }
         }
-        .alert("分享图片", isPresented: $showsSharePlaceholder) {
+        .alert("分享失败", isPresented: .init(
+            get: { shareErrorMessage != nil },
+            set: { if !$0 { shareErrorMessage = nil } }
+        )) {
             Button("好", role: .cancel) {}
         } message: {
-            Text("分享功能将在后续接入。极简酷炫骑行水印海报正在装配中！")
+            Text(shareErrorMessage ?? "")
+        }
+        .sheet(isPresented: $showsShareSheet) {
+            if let shareImageURL {
+                ShareSheet(items: [shareImageURL])
+            }
         }
     }
 
@@ -208,37 +219,35 @@ struct RideReportView: View {
             RouteMapView(
                 coordinates: summary.routeCoordinates,
                 palette: palette,
-                interactionEnabled: false
+                interactionEnabled: true
             )
             .frame(height: mapHeight)
             .clipped()
-            .contentShape(Rectangle())
-            .onTapGesture {
+
+            Button {
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
                     mapExpansion = .compact
                 }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.down.right.and.arrow.up.left")
+                        .font(.system(size: 10, weight: .bold))
+                    Text("收起地图")
+                        .font(.system(size: 10, weight: .black, design: .monospaced))
+                }
+                .padding(.vertical, 6)
+                .padding(.horizontal, 10)
+                .background(palette.cardBackground.opacity(0.85))
+                .background(.ultraThinMaterial)
+                .foregroundStyle(palette.primaryText)
+                .clipShape(Capsule())
+                .overlay(
+                    Capsule()
+                        .stroke(palette.borderColor, lineWidth: 1)
+                )
             }
-
-            // 地图指示标签
-            HStack(spacing: 4) {
-                Image(systemName: "arrow.down.right.and.arrow.up.left")
-                    .font(.system(size: 10, weight: .bold))
-                Text("收起地图")
-                    .font(.system(size: 10, weight: .black, design: .monospaced))
-            }
-            .padding(.vertical, 6)
-            .padding(.horizontal, 10)
-            .background(palette.cardBackground.opacity(0.85))
-            .background(.ultraThinMaterial)
-            .foregroundStyle(palette.primaryText)
-            .clipShape(Capsule())
-            .overlay(
-                Capsule()
-                    .stroke(palette.borderColor, lineWidth: 1)
-            )
             .padding(12)
             .shadow(color: .black.opacity(0.06), radius: 4)
-            .allowsHitTesting(false)
         }
     }
 
@@ -338,16 +347,18 @@ struct RideReportView: View {
     }
 
     private var shareButton: some View {
-        Button(action: {
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-            showsSharePlaceholder = true
-        }) {
+        Button(action: shareRideImage) {
             HStack(spacing: 8) {
-                Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 15, weight: .bold))
-                Text("分享酷炫水印大图")
-                    .font(.system(size: 15, weight: .black, design: .monospaced))
-                    .tracking(1.5)
+                if isGeneratingShare {
+                    ProgressView()
+                        .tint(palette == .nightDark ? Color.black : Color.white)
+                } else {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 15, weight: .bold))
+                    Text("分享骑行长图")
+                        .font(.system(size: 15, weight: .black, design: .monospaced))
+                        .tracking(1.5)
+                }
             }
             .foregroundStyle(palette == .nightDark ? Color.black : Color.white)
             .frame(maxWidth: .infinity)
@@ -359,6 +370,24 @@ struct RideReportView: View {
                 .shadow(color: (palette == .nightDark ? palette.accentColor : palette.primaryText).opacity(0.3), radius: 10, y: 4)
         }
         .buttonStyle(ScaleButtonStyle())
+        .disabled(isGeneratingShare)
+    }
+
+    private func shareRideImage() {
+        guard !isGeneratingShare else { return }
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        isGeneratingShare = true
+
+        Task { @MainActor in
+            defer { isGeneratingShare = false }
+
+            if let url = RideShareImageExporter.exportPNG(summary: summary, palette: palette) {
+                shareImageURL = url
+                showsShareSheet = true
+            } else {
+                shareErrorMessage = "无法生成分享图片，请稍后重试。"
+            }
+        }
     }
 
     private func exportGPX() -> URL? {

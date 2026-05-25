@@ -10,30 +10,30 @@ final class AppModel {
     var rideSession: RideSession?
     var historyRecords: [RideSummary] = []
     var gpsStatus: GPSStatus = .searching
+    var isStartingRide = false
 
     init() {
         // 1. Core Boot Self-Healing Database Recovery Checks
         Task {
             // Scans and heals any unfinalized coordinate tables in WAL mode on Actor context
-            let healedRecs = await RideStore.shared.verifyOnStartupRecovery()
+            _ = await RideStore.shared.verifyOnStartupRecovery()
 
             // Read local SQLite compiled lists
             let savedRecs = await RideStore.shared.readAllSummaries()
 
-            // Populate the Main UI Thread arrays
+            // Populate the Main UI Thread arrays - start with real data only
             await MainActor.run {
-                if savedRecs.isEmpty && healedRecs.isEmpty {
-                    // Fallback to gorgeous preset lists if filesystem is completely empty
-                    self.historyRecords = MockData.historyRecords
-                } else {
-                    self.historyRecords = savedRecs
-                }
+                self.historyRecords = savedRecs
             }
         }
 
-        // 2. Setup telemetry feeds and default simulation toggles
+        // 2. Setup telemetry feeds with real GPS (simulation mode OFF)
         Task {
-            await SensorEngine.shared.setSimulationMode(true)
+            // Request location permissions first
+            await SensorEngine.shared.requestPermissions()
+            
+            // Use real GPS by default (set to false for production)
+            await SensorEngine.shared.setSimulationMode(false)
             await SensorEngine.shared.startEngine()
 
             // Keep updating GPS signal strength indicator in real-time
@@ -48,8 +48,18 @@ final class AppModel {
     }
 
     func startRide() {
-        rideSession = RideSession(appModel: self)
-        rideNavigationPath.append(RideRoute.activeRide)
+        guard !isStartingRide, rideSession == nil else { return }
+
+        isStartingRide = true
+        Task {
+            let session = RideSession(appModel: self)
+            let prepared = await session.prepare()
+            if prepared {
+                rideSession = session
+                rideNavigationPath.append(RideRoute.activeRide)
+            }
+            isStartingRide = false
+        }
     }
 
     func finishRide() {

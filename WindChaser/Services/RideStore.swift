@@ -7,11 +7,22 @@ public enum RideStoreError: Error {
     case databaseError(String)
 }
 
-public enum RideStoreState: Sendable, Codable, Equatable {
+public enum RideStoreState: Sendable, Codable {
     case idle
     case riding
     case paused
     case ended
+}
+
+extension RideStoreState: Equatable {
+    nonisolated public static func == (lhs: RideStoreState, rhs: RideStoreState) -> Bool {
+        switch (lhs, rhs) {
+        case (.idle, .idle), (.riding, .riding), (.paused, .paused), (.ended, .ended):
+            return true
+        default:
+            return false
+        }
+    }
 }
 
 /// A background central coordination Actor executing thread-safe State Machine transitions,

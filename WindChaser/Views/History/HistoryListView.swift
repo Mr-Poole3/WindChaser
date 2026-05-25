@@ -1,7 +1,5 @@
 import SwiftUI
 
-import SwiftUI
-
 struct HistoryListView: View {
     @Environment(AppModel.self) private var appModel
 
@@ -46,11 +44,9 @@ struct HistoryRowView: View {
 
     var body: some View {
         HStack(spacing: 16) {
-            // 高端微裁边缩略图
-            RouteMapView(
+            RouteThumbnailView(
                 coordinates: record.routeCoordinates,
-                palette: palette,
-                interactionEnabled: false
+                palette: palette
             )
             .frame(width: 96, height: 72)
             .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -58,9 +54,7 @@ struct HistoryRowView: View {
                 RoundedRectangle(cornerRadius: 10)
                     .stroke(palette.borderColor, lineWidth: 1)
             )
-            .allowsHitTesting(false)
 
-            // 信息排版精细调整 — 右对齐或错落有致
             VStack(alignment: .leading, spacing: 6) {
                 Text(MetricFormatter.date(record.startedAt))
                     .font(.system(size: 14, weight: .bold, design: .rounded))
@@ -104,7 +98,6 @@ struct HistoryRowView: View {
     }
 }
 
-// 卡片专用点击动效，带来极高阶手感
 struct CardTapButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label

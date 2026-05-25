@@ -1,6 +1,33 @@
 import Foundation
 import CoreLocation
 
+private extension CLLocation {
+    func bearing(to destination: CLLocation) -> Double {
+        let lat1 = coordinate.latitude * .pi / 180
+        let lat2 = destination.coordinate.latitude * .pi / 180
+        let deltaLon = (destination.coordinate.longitude - coordinate.longitude) * .pi / 180
+
+        let y = sin(deltaLon) * cos(lat2)
+        let x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(deltaLon)
+        let radians = atan2(y, x)
+        let degrees = radians * 180 / .pi
+        return degrees >= 0 ? degrees : degrees + 360
+    }
+}
+
+private func resolvedCourse(from location: CLLocation, previous: CLLocation?) -> Double? {
+    if location.course >= 0 {
+        return location.course
+    }
+
+    guard let previous else { return nil }
+
+    let distance = location.distance(from: previous)
+    guard distance >= 3 else { return nil }
+
+    return previous.bearing(to: location)
+}
+
 @MainActor
 private final class LocationManagerHelper: NSObject, CLLocationManagerDelegate {
     private let manager = CLLocationManager()
@@ -12,11 +39,8 @@ private final class LocationManagerHelper: NSObject, CLLocationManagerDelegate {
         manager.delegate = self
         manager.desiredAccuracy = kCLLocationAccuracyBestForNavigation
         manager.distanceFilter = kCLDistanceFilterNone
-
-        #if !targetEnvironment(simulator)
-        manager.allowsBackgroundLocationUpdates = true
-        manager.showsBackgroundLocationIndicator = true
-        #endif
+        manager.activityType = .fitness
+        manager.pausesLocationUpdatesAutomatically = false
     }
 
     func requestPermission() {
@@ -31,6 +55,10 @@ private final class LocationManagerHelper: NSObject, CLLocationManagerDelegate {
         manager.stopUpdatingLocation()
     }
 
+    func requestOneShotLocation() {
+        manager.requestLocation()
+    }
+
     func getGpsSignalStatus() -> GPSStatus {
         let status = manager.authorizationStatus
         switch status {
@@ -39,14 +67,8 @@ private final class LocationManagerHelper: NSObject, CLLocationManagerDelegate {
         case .restricted, .denied:
             return .unavailable
         case .authorizedWhenInUse, .authorizedAlways:
-            if let accuracy = manager.location?.horizontalAccuracy {
-                if accuracy < 0 {
-                    return .unavailable
-                } else if accuracy <= 15 {
-                    return .ready
-                } else {
-                    return .weak
-                }
+            if let location = manager.location {
+                return Self.gpsStatus(for: location)
             }
             return .searching
         @unknown default:
@@ -54,8 +76,26 @@ private final class LocationManagerHelper: NSObject, CLLocationManagerDelegate {
         }
     }
 
+    static func gpsStatus(for location: CLLocation) -> GPSStatus {
+        let accuracy = location.horizontalAccuracy
+        if accuracy < 0 {
+            return .unavailable
+        } else if accuracy <= 15 {
+            return .ready
+        } else {
+            return .weak
+        }
+    }
+
+    nonisolated static func selectBestLocation(from locations: [CLLocation]) -> CLLocation? {
+        locations
+            .filter { LocationQuality.isAcceptable($0, allowRelaxedAccuracy: true) }
+            .min(by: { $0.horizontalAccuracy < $1.horizontalAccuracy })
+            ?? locations.last
+    }
+
     nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        guard let location = locations.last else { return }
+        guard let location = Self.selectBestLocation(from: locations) else { return }
         Task { @MainActor in
             onLocationUpdate?(location)
         }
@@ -67,6 +107,24 @@ private final class LocationManagerHelper: NSObject, CLLocationManagerDelegate {
             onStatusUpdate?(status)
         }
     }
+
+    nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        // requestLocation() can fail transiently; continuous updates will recover.
+    }
+}
+
+private enum LocationQuality {
+    static let maxAge: TimeInterval = 12
+    static let strictAccuracy = 40.0
+    static let relaxedAccuracy = 80.0
+
+    nonisolated static func isAcceptable(_ location: CLLocation, allowRelaxedAccuracy: Bool) -> Bool {
+        guard location.horizontalAccuracy >= 0 else { return false }
+        guard abs(location.timestamp.timeIntervalSinceNow) <= maxAge else { return false }
+
+        let limit = allowRelaxedAccuracy ? relaxedAccuracy : strictAccuracy
+        return location.horizontalAccuracy <= limit
+    }
 }
 
 /// A thread-safe, background high-performance telemetry engine that manages both mock simulation
@@ -74,14 +132,27 @@ private final class LocationManagerHelper: NSObject, CLLocationManagerDelegate {
 public actor SensorEngine {
     public static let shared = SensorEngine()
 
-    private let helper: LocationManagerHelper
+    private static nonisolated let defaultMockRoute: [MapCoordinate] = [
+        MapCoordinate(latitude: 39.9042, longitude: 116.4074),
+        MapCoordinate(latitude: 39.9055, longitude: 116.4090),
+        MapCoordinate(latitude: 39.9070, longitude: 116.4115),
+        MapCoordinate(latitude: 39.9088, longitude: 116.4140),
+        MapCoordinate(latitude: 39.9105, longitude: 116.4168),
+        MapCoordinate(latitude: 39.9120, longitude: 116.4195),
+        MapCoordinate(latitude: 39.9135, longitude: 116.4220),
+        MapCoordinate(latitude: 39.9150, longitude: 116.4248)
+    ]
+
+    private var locationHelper: LocationManagerHelper?
     private var isSimulating = false
+    private var isTracking = false
     private var timerTask: Task<Void, Never>?
 
     // Mock Route simulation state
-    private var mockRoute: [MapCoordinate] = MockData.sampleRoute
+    private var mockRoute: [MapCoordinate]
     private var currentMockIndex = 0
     private var lastAltitude: Double = 50.0
+    private var lastLocation: CLLocation?
 
     // Biometrics generation boundaries
     private var mockHeartRate = 135
@@ -93,34 +164,82 @@ public actor SensorEngine {
 
     // Authorization / Status trackers
     private var mockGpsStatus: GPSStatus = .ready
+    private var freshLocationContinuation: CheckedContinuation<MapCoordinate?, Never>?
+    private var freshLocationTimeoutTask: Task<Void, Never>?
 
     private init() {
-        // LocationManagerHelper must be initialized on the Main Thread
-        let helper = LocationManagerHelper()
-        self.helper = helper
-
-        // Wire up CoreLocation forwards
-        helper.onLocationUpdate = { [weak self] location in
-            guard let self else { return }
-            Task {
-                await self.receiveRealLocation(location)
-            }
-        }
+        self.mockRoute = Self.defaultMockRoute
     }
 
     /// Request permissions for CoreLocation GPS tracking.
     public func requestPermissions() {
-        Task { @MainActor in
-            helper.requestPermission()
+        Task {
+            let helper = await ensureLocationHelper()
+            await MainActor.run {
+                helper.requestPermission()
+            }
         }
     }
 
     /// Retrieve the current GPS signal health.
-    public func getGpsStatus() -> GPSStatus {
+    public func getGpsStatus() async -> GPSStatus {
         if isSimulating {
             return mockGpsStatus
         }
-        return helper.getGpsSignalStatus()
+        let helper = await ensureLocationHelper()
+        return await MainActor.run {
+            helper.getGpsSignalStatus()
+        }
+    }
+
+    /// Latest known coordinate for map seeding before the first ride sample arrives.
+    public func lastKnownCoordinate() -> MapCoordinate? {
+        guard let lastLocation else { return nil }
+        return coordinate(from: lastLocation)
+    }
+
+    /// Request a one-shot location refresh before starting a ride.
+    public func requestFreshLocationFix() {
+        Task {
+            let helper = await ensureLocationHelper()
+            await MainActor.run {
+                helper.requestOneShotLocation()
+            }
+        }
+    }
+
+    /// Wait for a reasonably accurate GPS fix before showing the rider on the map.
+    public func awaitAccurateCoordinate(maxWaitSeconds: TimeInterval = 8) async -> MapCoordinate? {
+        if let lastLocation, LocationQuality.isAcceptable(lastLocation, allowRelaxedAccuracy: false) {
+            return coordinate(from: lastLocation)
+        }
+
+        return await withCheckedContinuation { continuation in
+            freshLocationContinuation = continuation
+            freshLocationTimeoutTask?.cancel()
+            freshLocationTimeoutTask = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(maxWaitSeconds * 1_000_000_000))
+                await self?.finishFreshLocationRequest(with: self?.lastKnownCoordinate())
+            }
+            Task {
+                await self.requestFreshLocationFix()
+            }
+        }
+    }
+
+    private func finishFreshLocationRequest(with coordinate: MapCoordinate?) {
+        freshLocationTimeoutTask?.cancel()
+        freshLocationTimeoutTask = nil
+        guard let freshLocationContinuation else { return }
+        self.freshLocationContinuation = nil
+        freshLocationContinuation.resume(returning: coordinate)
+    }
+
+    private func coordinate(from location: CLLocation) -> MapCoordinate {
+        MapCoordinate(
+            latitude: location.coordinate.latitude,
+            longitude: location.coordinate.longitude
+        )
     }
 
     /// Safely register a subscription stream for newly produced 1Hz bike telemetry frames.
@@ -147,10 +266,14 @@ public actor SensorEngine {
         isSimulating = enabled
         if isSimulating {
             stopGpsTracking()
-            startSimulationTimer()
+            if isTracking {
+                startSimulationTimer()
+            }
         } else {
             stopSimulationTimer()
-            startGpsTracking()
+            if isTracking {
+                startGpsTracking()
+            }
         }
     }
 
@@ -160,6 +283,9 @@ public actor SensorEngine {
 
     /// Begin feeding telemetry snapshots (either GPS or Sim).
     public func startEngine() {
+        guard !isTracking else { return }
+        isTracking = true
+
         if isSimulating {
             startSimulationTimer()
         } else {
@@ -169,6 +295,7 @@ public actor SensorEngine {
 
     /// End sensor telemetry aggregation loops.
     public func stopEngine() {
+        isTracking = false
         stopSimulationTimer()
         stopGpsTracking()
     }
@@ -231,7 +358,8 @@ public actor SensorEngine {
             heartRate: mockHeartRate,
             cadence: mockCadence,
             power: mockPower,
-            grade: gradeDelta
+            grade: gradeDelta,
+            course: locCurrent.bearing(to: locNext)
         )
 
         broadcast(snapshot)
@@ -239,19 +367,65 @@ public actor SensorEngine {
 
     // MARK: - CoreLocation Telemetry Integrations
 
+    private func ensureLocationHelper() async -> LocationManagerHelper {
+        if let locationHelper {
+            return locationHelper
+        }
+
+        let helper = await MainActor.run {
+            let helper = LocationManagerHelper()
+            helper.onLocationUpdate = { [weak self] location in
+                guard let self else { return }
+                Task {
+                    await self.receiveRealLocation(location)
+                }
+            }
+            return helper
+        }
+
+        locationHelper = helper
+        return helper
+    }
+
     private func startGpsTracking() {
-        Task { @MainActor in
-            helper.startUpdates()
+        Task {
+            let helper = await ensureLocationHelper()
+            await MainActor.run {
+                helper.startUpdates()
+            }
         }
     }
 
     private func stopGpsTracking() {
-        Task { @MainActor in
-            helper.stopUpdates()
+        Task {
+            guard let helper = locationHelper else { return }
+            await MainActor.run {
+                helper.stopUpdates()
+            }
         }
     }
 
     private func receiveRealLocation(_ location: CLLocation) {
+        guard LocationQuality.isAcceptable(
+            location,
+            allowRelaxedAccuracy: lastLocation == nil
+        ) else {
+            return
+        }
+
+        if let freshLocationContinuation,
+           LocationQuality.isAcceptable(location, allowRelaxedAccuracy: false) {
+            finishFreshLocationRequest(with: coordinate(from: location))
+        }
+
+        // Prefer monotonically improving accuracy; ignore clearly worse fixes.
+        if let lastLocation,
+           lastLocation.horizontalAccuracy > 0,
+           location.horizontalAccuracy > lastLocation.horizontalAccuracy + 25,
+           location.distance(from: lastLocation) < 20 {
+            return
+        }
+
         // Compute speed and grade indicators on real hardware reports
         let velocityMs = max(0, location.speed)
 
@@ -264,12 +438,8 @@ public actor SensorEngine {
             }
         }
 
+        let previousLocation = lastLocation
         self.lastLocation = location
-
-        // Keep biometrics ticking on simulated Bluetooth fallback when hardware isn't attached
-        mockHeartRate = max(100, min(185, mockHeartRate + Int.random(in: -2...3)))
-        mockCadence = max(70, min(110, mockCadence + Int.random(in: -3...3)))
-        mockPower = max(100, min(380, mockPower + Int.random(in: -10...12)))
 
         let snapshot = BikeDataSnapshot(
             timestamp: location.timestamp,
@@ -277,27 +447,20 @@ public actor SensorEngine {
             longitude: location.coordinate.longitude,
             altitude: location.altitude,
             speed: velocityMs,
-            heartRate: mockHeartRate,
-            cadence: mockCadence,
-            power: mockPower,
-            grade: calculatedGrade
+            heartRate: nil,
+            cadence: nil,
+            power: nil,
+            grade: calculatedGrade,
+            course: resolvedCourse(from: location, previous: previousLocation)
         )
 
         broadcast(snapshot)
     }
 
-    private func handleLocationUpdate(_ location: CLLocation) {
-        receiveRealLocation(location)
-    }
-
-    private func handleStatusUpdate(_ status: CLAuthorizationStatus) {
-        // Transmit potential telemetry error messages if permissions reject
-    }
-
     // MARK: - Event Broadcaster
 
     private func broadcast(_ snapshot: BikeDataSnapshot) {
-        for (id, continuation) in continuations {
+        for (_, continuation) in continuations {
             let result = continuation.yield(snapshot)
             if case .dropped = result {
                 // Buffer filled, drop or queue cleanup
