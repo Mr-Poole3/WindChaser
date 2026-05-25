@@ -57,6 +57,8 @@ enum WatchRelayState: String, Codable, CaseIterable, Equatable, Sendable {
     case waitingForPhone
     case needsAuthorization
     case relaying
+    /// iPhone 已暂停骑行，Watch 端 workout 也处于暂停态，不应显示实时心率。
+    case paused
     /// HKWorkoutSession 在跑，但已超过新鲜度阈值收不到心率样本，
     /// 通常意味着 Apple Watch 未佩戴 / 接触不良。
     case stalled

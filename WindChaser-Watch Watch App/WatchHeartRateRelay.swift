@@ -119,6 +119,9 @@ final class WatchHeartRateRelay: NSObject {
         guard let workoutSession, isWorkoutActive, !isWorkoutPaused else { return }
         workoutSession.pause()
         isWorkoutPaused = true
+        currentHeartRate = nil
+        lastHeartRateAt = nil
+        isHeartRateStalled = false
     }
 
     func resumeWorkout() {
@@ -174,6 +177,7 @@ final class WatchHeartRateRelay: NSObject {
     }
 
     fileprivate func ingest(heartRateSample bpm: Int) {
+        guard isWorkoutActive, !isWorkoutPaused else { return }
         currentHeartRate = bpm
         lastHeartRateAt = Date()
         sampleSequence += 1
@@ -225,11 +229,15 @@ final class WatchHeartRateRelay: NSObject {
         case .paused:
             isWorkoutActive = true
             isWorkoutPaused = true
+            currentHeartRate = nil
+            lastHeartRateAt = nil
+            isHeartRateStalled = false
         case .ended, .stopped:
             isWorkoutActive = false
             isWorkoutPaused = false
             currentHeartRate = nil
             lastHeartRateAt = nil
+            isHeartRateStalled = false
         default:
             break
         }

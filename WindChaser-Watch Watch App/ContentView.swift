@@ -79,6 +79,11 @@ struct ContentView: View {
                 .monospacedDigit()
                 .foregroundStyle(.white.opacity(0.85))
 
+        case .paused:
+            Text("已暂停")
+                .font(.system(size: 16, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white)
+
         case .needsAuthorization:
             Text("需授权")
                 .font(.system(size: 16, weight: .semibold, design: .rounded))
@@ -117,17 +122,22 @@ struct ContentView: View {
             return .disconnected
         }
 
-        // 3. workout 正在跑但心率样本已陈旧 → 提醒检查佩戴
+        // 3. iPhone 已暂停骑行 → Watch 不显示实时心率
+        if heartRate.isWorkoutActive && heartRate.isWorkoutPaused {
+            return .paused
+        }
+
+        // 4. workout 正在跑但心率样本已陈旧 → 提醒检查佩戴
         if heartRate.isWorkoutActive && heartRate.isHeartRateStalled {
             return .stalled
         }
 
-        // 4. workout 正在跑且已收到新鲜心率 → 心率传输中
+        // 5. workout 正在跑且已收到新鲜心率 → 心率传输中
         if heartRate.isWorkoutActive && heartRate.currentHeartRate != nil {
             return .relaying
         }
 
-        // 5. 其余情况都归为「等待 iPhone」——
+        // 6. 其余情况都归为「等待 iPhone」——
         //    包括「未决定 / 已授权但还没拿到第一拍心率」「workout 还在启动」
         return .waitingForPhone
     }
@@ -136,6 +146,8 @@ struct ContentView: View {
         switch relayState {
         case .relaying:
             "由 iPhone 控制骑行"
+        case .paused:
+            "iPhone 已暂停骑行"
         case .stalled:
             "请检查 Apple Watch 是否佩戴牢固"
         case .needsAuthorization:
@@ -155,6 +167,8 @@ struct ContentView: View {
             .yellow
         case .stalled, .needsAuthorization:
             .orange
+        case .paused:
+            .yellow
         case .relaying:
             .green
         }
