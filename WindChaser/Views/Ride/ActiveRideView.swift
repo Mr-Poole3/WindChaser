@@ -53,11 +53,40 @@ struct ActiveRideView: View {
     // MARK: - Top Status Bar (GPS + close)
 
     private var topStatusBar: some View {
-        HStack {
+        HStack(spacing: 8) {
             gpsIndicator
+            if let session = appModel.rideSession, session.isHeartRateStalled {
+                heartRateWarningPill
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
             Spacer()
             topMenuButton
         }
+        .animation(.easeInOut(duration: 0.2), value: appModel.rideSession?.isHeartRateStalled)
+    }
+
+    private var heartRateWarningPill: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "applewatch.slash")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(palette.warningColor)
+
+            Text("请检查手表佩戴")
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(palette.primaryText)
+                .lineLimit(1)
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
+        .background(
+            Capsule(style: .continuous)
+                .fill(Color.black.opacity(0.55))
+        )
+        .overlay(
+            Capsule(style: .continuous)
+                .stroke(palette.warningColor.opacity(0.45), lineWidth: 1)
+        )
+        .accessibilityLabel("Apple Watch 心率数据已陈旧，请检查佩戴")
     }
 
     private var gpsIndicator: some View {

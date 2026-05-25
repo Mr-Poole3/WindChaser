@@ -73,6 +73,12 @@ struct ContentView: View {
                     .foregroundStyle(.white.opacity(0.65))
             }
 
+        case .stalled:
+            Text("--")
+                .font(.system(size: 28, weight: .heavy, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(.white.opacity(0.85))
+
         case .needsAuthorization:
             Text("需授权")
                 .font(.system(size: 16, weight: .semibold, design: .rounded))
@@ -111,12 +117,17 @@ struct ContentView: View {
             return .disconnected
         }
 
-        // 3. workout 正在跑且已收到心率 → 心率传输中
+        // 3. workout 正在跑但心率样本已陈旧 → 提醒检查佩戴
+        if heartRate.isWorkoutActive && heartRate.isHeartRateStalled {
+            return .stalled
+        }
+
+        // 4. workout 正在跑且已收到新鲜心率 → 心率传输中
         if heartRate.isWorkoutActive && heartRate.currentHeartRate != nil {
             return .relaying
         }
 
-        // 4. 其余情况都归为「等待 iPhone」——
+        // 5. 其余情况都归为「等待 iPhone」——
         //    包括「未决定 / 已授权但还没拿到第一拍心率」「workout 还在启动」
         return .waitingForPhone
     }
@@ -125,6 +136,8 @@ struct ContentView: View {
         switch relayState {
         case .relaying:
             "由 iPhone 控制骑行"
+        case .stalled:
+            "请检查 Apple Watch 是否佩戴牢固"
         case .needsAuthorization:
             "请在 Watch 端开启心率读取权限"
         case .waitingForPhone:
@@ -140,7 +153,7 @@ struct ContentView: View {
             .red
         case .waitingForPhone:
             .yellow
-        case .needsAuthorization:
+        case .stalled, .needsAuthorization:
             .orange
         case .relaying:
             .green

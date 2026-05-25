@@ -10,9 +10,16 @@ public final class RideSession {
     private(set) var metrics = LiveMetrics()
     private(set) var routeCoordinates: [MapCoordinate] = []
     private(set) var currentCoordinate: MapCoordinate?
+    /// iPhone 端已超过 `heartRateStaleAfter` 没收到 Watch 心率，
+    /// 通常意味着 Apple Watch 未佩戴或链路抖动；UI 应清空数值并提醒。
+    private(set) var isHeartRateStalled: Bool = false
+
+    /// iPhone 端心率陈旧阈值：与 Watch 端保持一致。
+    private let heartRateStaleAfter: TimeInterval = 8
 
     private var subscriptionTask: Task<Void, Never>?
     private var heartRateRelayTask: Task<Void, Never>?
+    private var heartRateFreshnessTask: Task<Void, Never>?
     private var elapsedTimer: Task<Void, Never>?
     private var lastSampleCoordinate: MapCoordinate?
     private var lastMapCoordinateAt: Date?
@@ -62,6 +69,7 @@ public final class RideSession {
             routeCoordinates = currentCoordinate.map { [$0] } ?? []
             state = .riding
             startElapsedTimer()
+            startHeartRateFreshnessTicker()
             return true
         } catch {
             print("Failed to start ride in RideStore: \(error)")
@@ -160,6 +168,45 @@ public final class RideSession {
         }
     }
 
+    /// 1s 节奏的心率新鲜度 ticker：基于 `WCSManager.shared.lastHeartRateAt` 判断。
+    ///
+    /// - 超过 `heartRateStaleAfter` 没收到 Watch 心率 → 清空 `metrics.heartRate`、置 `isHeartRateStalled = true`
+    /// - 收到新心率会刷新 `lastHeartRateAt`，下一拍自动取消 stalled
+    /// - 暂停态期间不判定 stalled（Watch workout 也会暂停，不再产生样本）
+    private func startHeartRateFreshnessTicker() {
+        heartRateFreshnessTask?.cancel()
+        heartRateFreshnessTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard !Task.isCancelled, let self else { break }
+                await MainActor.run {
+                    self.evaluateHeartRateFreshness()
+                }
+            }
+        }
+    }
+
+    private func evaluateHeartRateFreshness() {
+        guard state == .riding else {
+            isHeartRateStalled = false
+            return
+        }
+
+        guard let lastSeen = WCSManager.shared.lastHeartRateAt else {
+            isHeartRateStalled = false
+            return
+        }
+
+        if Date().timeIntervalSince(lastSeen) > heartRateStaleAfter {
+            if metrics.heartRate != nil {
+                metrics.heartRate = nil
+            }
+            isHeartRateStalled = true
+        } else {
+            isHeartRateStalled = false
+        }
+    }
+
     private func listenToWatchHeartRate(sessionID: UUID) {
         heartRateRelayTask?.cancel()
         heartRateRelayTask = Task { [weak self] in
@@ -177,6 +224,7 @@ public final class RideSession {
                         return
                     }
                     self.metrics.heartRate = heartRate.bpm
+                    self.isHeartRateStalled = false
                 }
             }
         }
@@ -236,6 +284,9 @@ public final class RideSession {
         subscriptionTask = nil
         heartRateRelayTask?.cancel()
         heartRateRelayTask = nil
+        heartRateFreshnessTask?.cancel()
+        heartRateFreshnessTask = nil
+        isHeartRateStalled = false
         if let rideID {
             WCSManager.shared.sendControlCommand(.end(sessionID: rideID))
         }

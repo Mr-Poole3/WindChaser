@@ -23,6 +23,12 @@ final class WatchHeartRateRelay: NSObject {
     private(set) var currentHeartRate: Int?
     private(set) var lastHeartRateAt: Date?
     private(set) var sampleSequence: Int = 0
+    /// workout 在跑但已超过 `staleAfter` 没收到心率样本，
+    /// 通常意味着手表未佩戴或心率传感器接触不良。
+    private(set) var isHeartRateStalled: Bool = false
+
+    /// 心率样本超过这个时长没更新就视为陈旧，UI 应清空显示并提醒用户检查佩戴。
+    private let staleAfter: TimeInterval = 8
 
     private let healthStore = HKHealthStore()
     private let heartRateType = HKQuantityType(.heartRate)
@@ -30,6 +36,7 @@ final class WatchHeartRateRelay: NSObject {
 
     private var workoutSession: HKWorkoutSession?
     private var workoutBuilder: HKLiveWorkoutBuilder?
+    private var freshnessTask: Task<Void, Never>?
 
     // MARK: - Public API
 
@@ -100,6 +107,7 @@ final class WatchHeartRateRelay: NSObject {
             workoutBuilder = builder
             isWorkoutActive = true
             isWorkoutPaused = false
+            startFreshnessTicker()
         } catch {
             print("Failed to start workout session: \(error)")
             authorizationStatus = .denied
@@ -153,6 +161,8 @@ final class WatchHeartRateRelay: NSObject {
     // MARK: - Private
 
     private func cleanupWorkoutState() {
+        freshnessTask?.cancel()
+        freshnessTask = nil
         workoutSession = nil
         workoutBuilder = nil
         isWorkoutActive = false
@@ -160,12 +170,51 @@ final class WatchHeartRateRelay: NSObject {
         currentHeartRate = nil
         lastHeartRateAt = nil
         sampleSequence = 0
+        isHeartRateStalled = false
     }
 
     fileprivate func ingest(heartRateSample bpm: Int) {
         currentHeartRate = bpm
         lastHeartRateAt = Date()
         sampleSequence += 1
+        isHeartRateStalled = false
+    }
+
+    /// 启动一个 1s 节奏的 ticker，定期检查心率样本是否陈旧。
+    ///
+    /// 当 workout 在跑但 `lastHeartRateAt` 超过 `staleAfter` 没更新时：
+    /// - 清空 `currentHeartRate`（避免 UI 卡住旧值）
+    /// - 把 `isHeartRateStalled` 置为 `true`，让 UI 提醒用户检查佩戴
+    private func startFreshnessTicker() {
+        freshnessTask?.cancel()
+        freshnessTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard !Task.isCancelled, let self else { break }
+                await MainActor.run {
+                    self.evaluateFreshness()
+                }
+            }
+        }
+    }
+
+    private func evaluateFreshness() {
+        guard isWorkoutActive, !isWorkoutPaused else {
+            isHeartRateStalled = false
+            return
+        }
+
+        guard let lastHeartRateAt else {
+            isHeartRateStalled = false
+            return
+        }
+
+        if Date().timeIntervalSince(lastHeartRateAt) > staleAfter {
+            currentHeartRate = nil
+            isHeartRateStalled = true
+        } else {
+            isHeartRateStalled = false
+        }
     }
 
     fileprivate func handleSessionStateChange(_ state: HKWorkoutSessionState) {

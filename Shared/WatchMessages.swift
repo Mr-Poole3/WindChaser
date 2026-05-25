@@ -57,6 +57,9 @@ enum WatchRelayState: String, Codable, CaseIterable, Equatable, Sendable {
     case waitingForPhone
     case needsAuthorization
     case relaying
+    /// HKWorkoutSession 在跑，但已超过新鲜度阈值收不到心率样本，
+    /// 通常意味着 Apple Watch 未佩戴 / 接触不良。
+    case stalled
 }
 
 enum SensorFreshness: String, Codable, Equatable, Sendable {
